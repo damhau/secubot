@@ -17,8 +17,8 @@ build/
 # local tooling and sandbox placeholders (root only: test fixtures may contain these names)
 /.claude/
 /.mcp.json
-/.idea/
-/.vscode/
+/.idea
+/.vscode
 /.gitconfig
 /.gitmodules
 /.ripgreprc
