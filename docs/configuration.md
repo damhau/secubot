@@ -5,7 +5,7 @@
 ```yaml
 jobs:
   secfix:
-    uses: YOUR_ORG/secubot/.github/workflows/secfix.yml@v1
+    uses: damhau/secubot/.github/workflows/secfix.yml@v1
     permissions: { contents: write, pull-requests: write, issues: write, security-events: write, actions: read }
     with: { … } # all optional
     secrets: { ANTHROPIC_API_KEY: …, … }
@@ -23,7 +23,7 @@ jobs:
 | `go-version-file` | `go.mod` | used by `setup-go` when Go is detected |
 | `max-parallel-fixes` | `2` | concurrent fix jobs |
 | `instance` | `""` | artifact namespace for several calls in one run (monorepo), e.g. `-api` |
-| `secubot-repository` | `YOUR_ORG/secubot` | central repository to check secubot out from |
+| `secubot-repository` | `damhau/secubot` | central repository to check secubot out from |
 | `secubot-ref` | the release tag | ref of the central repository. Stamped by `release.sh` so `@v1` runs matching code. Override only for testing |
 
 ### Secrets

@@ -17,7 +17,7 @@ on:
       secubot-repository:
         description: Central repository holding this workflow (owner/name)
         type: string
-        default: YOUR_ORG/secubot
+        default: damhau/secubot
       secubot-ref:
         description: Ref of the central repository to run. Stamped by scripts/release.sh.
         type: string

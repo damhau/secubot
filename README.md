@@ -64,11 +64,9 @@ permissions: {}
 concurrency: { group: secfix, cancel-in-progress: false }
 jobs:
   secfix:
-    uses: damhau/secubot/.github/workflows/secfix.yml@main
+    uses: damhau/secubot/.github/workflows/secfix.yml@v1 # pinned to a SHA in step 7
     permissions: { contents: write, pull-requests: write, issues: write, security-events: write, actions: read }
     with:
-      secubot-repository: damhau/secubot
-      secubot-ref: main # pin a release tag or SHA in step 7
       dry-run: true # removed in step 6
       egress-policy: audit # removed in step 7
     secrets:
@@ -133,8 +131,9 @@ merged Dependabot PR, a manual fix), the next run closes its secubot issue or PR
 1. Uncomment `schedule:`.
 2. After a few runs, look at the harden-runner section of each job log for the outbound
    connections, then delete `egress-policy: audit` so the default `block` applies.
-3. Pin `@main` and `secubot-ref` to a release tag or SHA, so a secubot change reaches the
-   repository only through a reviewed PR.
+3. Optionally, pin `@v1` to the release's full commit SHA (`@<sha> # v1.0.0`). `@v1`
+   follows every 1.x release on its next run. A SHA pin changes only through a PR from
+   Dependabot's `github-actions` updates (or Renovate), so each secubot upgrade is reviewed.
 
 **To turn it off**, delete `.github/workflows/secfix.yml`. The `secfix/*` branches and
 `secfix-state` can be deleted at any time.

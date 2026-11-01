@@ -7,7 +7,7 @@ permissions: {}
 concurrency: { group: secfix, cancel-in-progress: false }
 jobs:
   secfix:
-    uses: YOUR_ORG/secubot/.github/workflows/secfix.yml@v1 # or @<sha> # v1.2.3
+    uses: damhau/secubot/.github/workflows/secfix.yml@v1 # or @<sha> # v1.2.3
     permissions: { contents: write, pull-requests: write, issues: write, security-events: write, actions: read }
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

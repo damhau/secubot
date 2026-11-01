@@ -2,7 +2,7 @@
 
 ## Releases
 
-Target repositories call `YOUR_ORG/secubot/.github/workflows/secfix.yml@v1`, or better, a
+Target repositories call `damhau/secubot/.github/workflows/secfix.yml@v1`, or better, a
 full commit SHA that Renovate/Dependabot keeps up to date (`@<sha> # v1.2.3`). The
 reusable workflow checks secubot itself out at `secubot-ref`, so the default of that input
 must point at the same release:

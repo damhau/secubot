@@ -5,7 +5,7 @@
   "packageRules": [
     {
       "description": "secubot upgrades roll out like any other action: reviewed PR, digest pin",
-      "matchDepNames": ["YOUR_ORG/secubot"],
+      "matchDepNames": ["damhau/secubot"],
       "groupName": "secubot"
     },
     {

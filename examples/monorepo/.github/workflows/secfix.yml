@@ -17,7 +17,7 @@ jobs:
           - { name: api, config: services/api/.secfix.yml }
           - { name: worker, config: services/worker/.secfix.yml }
           - { name: tools, config: tools/.secfix.yml }
-    uses: YOUR_ORG/secubot/.github/workflows/secfix.yml@v1
+    uses: damhau/secubot/.github/workflows/secfix.yml@v1
     permissions: { contents: write, pull-requests: write, issues: write, security-events: write, actions: read }
     with:
       config-path: ${{ matrix.config }}

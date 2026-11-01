@@ -25,18 +25,19 @@ PRs (`@v1` → a digest pin, via Renovate/Dependabot).
 
 ## 1. Set up the central repository (once)
 
-1. Fork or copy this repository into your organisation, e.g. `YOUR_ORG/secubot`.
-2. Replace `YOUR_ORG/secubot` in:
+1. Use `damhau/secubot` directly, or fork or copy it into your organisation to control
+   releases yourself.
+2. In a fork, replace `damhau/secubot` with your repository in:
    - `.github/workflows/secfix.yml` (`secubot-repository` default)
-   - `examples/`
-   - `control-plane/fleet.yml`
+   - `examples/` and the docs' snippets
+   - `control-plane/fleet.yml` (the target repositories)
 3. Make the reusable workflow callable. Under **Settings → Actions → General → Access**,
    allow access from repositories in your organisation (for a private or internal
    repository). A public central repository needs nothing.
 4. If the central repository is private, the jobs check secubot out with
    `SECUBOT_READ_TOKEN`. That is a fine-grained token, or better a GitHub App installation
    token, with **Contents: read on the central repository only**.
-5. Cut the first release with `scripts/release.sh 0.1.0`, then push the tags (the script
+5. In a fork, cut a first release with `scripts/release.sh 1.0.0`, then push the tags (the script
    prints the commands). See [operations](operations.md#releases).
 
 ## 2. Onboard a repository
@@ -113,7 +114,7 @@ paths:
   skip: [vendor/, "**/testdata/", docs/]
 ```
 
-Validate it locally with `uvx --from git+https://github.com/YOUR_ORG/secubot secubot
+Validate it locally with `uvx --from git+https://github.com/damhau/secubot secubot
 config-check --repo .`, or with `uv run secubot config-check --repo <path>` from a
 checkout. The full reference is in [configuration](configuration.md).
 
