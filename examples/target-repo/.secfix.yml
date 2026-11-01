@@ -1,0 +1,72 @@
+# secubot configuration for this repository. Every key is optional; these are the defaults
+# unless marked "example". Validate with: secubot config-check --repo .
+version: 1
+
+# languages: [go, python]          # auto-detected from go.mod / pyproject.toml / requirements*.txt
+
+paths:
+  skip: # gitignore-style; findings here are dropped and scanners skip literal directories
+    - vendor/
+    - node_modules/
+    - third_party/
+    - "**/testdata/"
+    - "**/*_test.go" # example: ignore test-only code
+    - docs/ # example
+
+commands: # run by secubot (scrubbed env) to verify a fix; the agent may run them verbatim
+  setup: "" # example: "go mod download" or "uv sync --frozen"
+  build: "go build ./..." # example
+  test: "go test ./..." # example; keep commands simple (wrap complex ones in a make target)
+  timeout_minutes: 20
+
+scanners:
+  trivy: true # fs: dependencies, IaC, secrets, licences
+  trivy_image:
+    enabled: false # build the Dockerfile and scan the image (needs docker egress)
+    dockerfile: Dockerfile
+    context: .
+  govulncheck: true
+  gosec: true
+  bandit: true
+  pip_audit: true
+  semgrep:
+    enabled: true
+    configs: [p/default] # registry packs or repo-relative rule files
+
+policy:
+  min_severity: medium
+  max_triage: 5 # clusters triaged per run (2 agent sessions each)
+  max_prs: 3 # fix attempts / draft PRs per run
+  kinds: [code, dependency, iac, secret]
+  skip_unreachable: true # drop deps govulncheck proved are not called
+  dependencies: breaking-only # all | breaking-only | none (simple bumps = Dependabot/Renovate)
+  auto_suppress: true
+  auto_suppress_max_severity: high # agreed FPs above this become issues instead
+  suppression_ttl_days: 30
+  cooldown_days: 90 # after a PR is closed unmerged / an issue is closed
+
+fix:
+  max_attempts: 3
+  extra_commands: [] # example: ["make lint", "go vet:*"]
+  allow_new_files: false
+  # sensitive_paths: [...]         # auth/crypto code: only touched if the finding is there
+  protected_paths: [] # added to the built-in list (.github/, .claude/, .secfix.yml, ...)
+  max_changed_files: 10
+  max_changed_lines: 400
+
+models:
+  triage: claude-opus-5-5
+  fix: claude-opus-5-5
+  effort: high
+  triage_budget_usd: 3 # per session; hard stop
+  fix_budget_usd: 10
+  triage_max_turns: 40
+  fix_max_turns: 60
+
+labels: [security]
+
+suppressions: # human-reviewed false positives; reason and expiry are mandatory
+  - rule: G404
+    path: internal/sim/**
+    reason: math/rand is used for simulation jitter, never for secrets
+    expires: 2027-06-30

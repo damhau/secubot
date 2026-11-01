@@ -1,0 +1,13 @@
+# services/api/.secfix.yml — paths are always relative to the repository root.
+version: 1
+paths:
+  skip:
+    - "/*" # skip everything at the top level ...
+    - "!/services/" # ... except services/
+    - "/services/*"
+    - "!/services/api/" # ... and only the api component
+commands:
+  build: make -C services/api build
+  test: make -C services/api test
+policy:
+  max_prs: 2

@@ -1,0 +1,17 @@
+# Repositories driven by the control plane. Each must already contain the caller workflow
+# (examples/target-repo/.github/workflows/secfix.yml) with a `workflow_dispatch` trigger,
+# and the dispatch App must be installed on it.
+workflow: secfix.yml # caller workflow file name in each repository
+ref: main
+slots: 24 # hourly control-plane cron + 24 slots = each repository once a day, spread out
+delay_seconds: 2
+report_artifact: "secubot*-report"
+repos:
+  - repo: YOUR_ORG/service-a
+  - repo: YOUR_ORG/service-b
+    ref: develop
+  - repo: YOUR_ORG/legacy-tool
+    inputs:
+      dry-run: "true" # onboarding: scan + triage + fix, publish nothing
+  - repo: YOUR_ORG/archived-thing
+    enabled: false

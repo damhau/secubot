@@ -1,0 +1,34 @@
+# Dogfooding: secubot runs on its own repository, from the commit being run.
+name: secfix (self)
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: secfix
+  cancel-in-progress: false
+
+jobs:
+  secfix:
+    uses: ./.github/workflows/secfix.yml
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      security-events: write
+      actions: read
+    with:
+      secubot-repository: ${{ github.repository }}
+      secubot-ref: ${{ github.sha }}
+      dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run }}
+      egress-policy: audit
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

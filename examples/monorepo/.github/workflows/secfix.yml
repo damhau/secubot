@@ -1,0 +1,27 @@
+# Monorepo variant: one run per component, each with its own config (skip patterns that
+# carve out the component, its own build/test commands and PR budget). Cluster ids and
+# branches are global, so components never collide; publishes are serialised per repo.
+name: secfix
+on:
+  schedule:
+    - cron: "11 2 * * *"
+  workflow_dispatch:
+permissions: {}
+jobs:
+  secfix:
+    strategy:
+      fail-fast: false
+      max-parallel: 1 # one component at a time keeps the Anthropic spend and PR volume flat
+      matrix:
+        include:
+          - { name: api, config: services/api/.secfix.yml }
+          - { name: worker, config: services/worker/.secfix.yml }
+          - { name: tools, config: tools/.secfix.yml }
+    uses: YOUR_ORG/secubot/.github/workflows/secfix.yml@v1
+    permissions: { contents: write, pull-requests: write, issues: write, security-events: write, actions: read }
+    with:
+      config-path: ${{ matrix.config }}
+      instance: -${{ matrix.name }} # artifact namespace: secubot-api-scan, ...
+      code-scanning: false # upload SARIF from one full-repo run instead (categories would clash)
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

@@ -1,0 +1,550 @@
+# secubot reusable workflow: scan -> normalise/select -> triage -> fix -> publish.
+#
+# Called from a ~10-line workflow in each target repository (see examples/target-repo).
+# Everything runs in the target repository with its own GITHUB_TOKEN. Jobs are split so
+# that no job holding a write token ever runs the agent or repository code:
+#
+#   scan     contents:read, security-events:write   scanners only, no model
+#   triage   contents:read                          Claude, read-only tools, no shell
+#   fix      contents:read                          Claude + build/test, emits a patch file
+#   publish  contents/pull-requests/issues:write    no model, no repo code; validates patches
+#   report   none                                   job summary + run report artifact
+name: secfix
+
+on:
+  workflow_call:
+    inputs:
+      secubot-repository:
+        description: Central repository holding this workflow (owner/name)
+        type: string
+        default: YOUR_ORG/secubot
+      secubot-ref:
+        description: Ref of the central repository to run. Stamped by scripts/release.sh.
+        type: string
+        default: "v0.1.0"
+      config-path:
+        description: Path of the configuration file in the target repository
+        type: string
+        default: .secfix.yml
+      dry-run:
+        description: Scan, triage and fix, but do not push, open PRs/issues or suppress
+        type: boolean
+        default: false
+      code-scanning:
+        description: Upload SARIF to GitHub code scanning (needs GitHub Code Security on private repos)
+        type: boolean
+        default: true
+      egress-policy:
+        description: harden-runner egress policy, `audit` while onboarding, then `block`
+        type: string
+        default: block
+      runs-on:
+        type: string
+        default: ubuntu-24.04
+      go-version-file:
+        description: go.mod (or go.work) used to pick the Go toolchain
+        type: string
+        default: go.mod
+      max-parallel-fixes:
+        type: number
+        default: 2
+      instance:
+        description: >
+          Artifact namespace when the workflow is called several times in one run (monorepo
+          matrix), e.g. "-api". Artifacts are named secubot<instance>-scan, ...
+        type: string
+        default: ""
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
+      SECUBOT_READ_TOKEN:
+        description: Read-only token for the central repository, if it is private
+        required: false
+      SECUBOT_APP_ID:
+        description: Optional GitHub App used by publish, so the PRs it opens trigger CI
+        required: false
+      SECUBOT_APP_PRIVATE_KEY:
+        required: false
+
+permissions: {}
+
+jobs:
+  scan:
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write # SARIF upload
+      actions: read # SARIF upload on private repositories
+      pull-requests: read # state: open/closed secubot PRs
+      issues: read # state: secubot issues
+    outputs:
+      has_work: ${{ steps.select.outputs.has_work }}
+      tools: ${{ steps.detect.outputs.tools }}
+      go: ${{ steps.detect.outputs.go }}
+      sha: ${{ steps.meta.outputs.sha }}
+      ref_name: ${{ steps.meta.outputs.ref_name }}
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: >
+            github.com:443 api.github.com:443 codeload.github.com:443 uploads.github.com:443
+            objects.githubusercontent.com:443 release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443 *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            pypi.org:443 files.pythonhosted.org:443
+            proxy.golang.org:443 sum.golang.org:443 vuln.go.dev:443 storage.googleapis.com:443
+            go.dev:443 dl.google.com:443
+            mirror.gcr.io:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+            semgrep.dev:443
+
+      - name: Checkout target
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: target
+          persist-credentials: false
+
+      - name: Checkout secubot
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.secubot-repository }}
+          ref: ${{ inputs.secubot-ref }}
+          token: ${{ secrets.SECUBOT_READ_TOKEN || github.token }}
+          path: secubot
+          persist-credentials: false
+
+      - uses: ./secubot/.github/actions/setup-secubot
+
+      - id: meta
+        name: Record scanned commit
+        run: |
+          echo "sha=$(git -C target rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "ref_name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - id: detect
+        name: Detect languages and scanners
+        env:
+          CONFIG: ${{ inputs.config-path }}
+        run: secubot detect --repo target --config "$CONFIG" --github-output
+
+      - name: Set up Go
+        if: steps.detect.outputs.go == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: target/${{ inputs.go-version-file }}
+          cache: false
+
+      - name: Install pinned scanners
+        env:
+          TOOLS: ${{ steps.detect.outputs.tools }}
+          GOTOOLCHAIN: local
+        run: |
+          mapfile -t tools < <(jq -r '.[]' <<<"$TOOLS")
+          secubot/scripts/install-scanners.sh "${tools[@]}"
+
+      - name: Fetch state (branches, PRs, issues, suppressions)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p state
+          gh api --paginate "repos/$REPO/git/matching-refs/heads/secfix/" --jq '.[].ref' \
+            | jq -R . | jq -s . > state/branches.json
+          gh pr list --repo "$REPO" --state all --limit 1000 \
+            --json number,headRefName,state,closedAt,mergedAt,url \
+            --jq '[.[] | select(.headRefName | startswith("secfix/"))]' > state/pulls.json
+          gh issue list --repo "$REPO" --state all --limit 500 --search "secfix in:title" \
+            --json number,title,state,closedAt,url > state/issues.json
+          gh api "repos/$REPO/contents/suppressions.yml?ref=secfix-state" \
+            -H "Accept: application/vnd.github.raw" > state/suppressions.yml 2>/dev/null \
+            || rm -f state/suppressions.yml
+          jq length state/branches.json state/pulls.json state/issues.json
+
+      - name: Scan
+        env:
+          CONFIG: ${{ inputs.config-path }}
+          TRIVY_CACHE_DIR: ${{ runner.temp }}/trivy-cache
+          SEMGREP_SEND_METRICS: "off"
+          GOTOOLCHAIN: local
+        run: secubot scan --repo target --config "$CONFIG" --out scan/sarif
+
+      - name: Normalise and deduplicate
+        env:
+          CONFIG: ${{ inputs.config-path }}
+          SHA: ${{ steps.meta.outputs.sha }}
+        run: |
+          secubot normalise --repo target --config "$CONFIG" --sarif-dir scan/sarif \
+            --out scan/report.json --base-sha "$SHA"
+
+      - id: select
+        name: Select new findings
+        env:
+          CONFIG: ${{ inputs.config-path }}
+        run: |
+          secubot select --repo target --config "$CONFIG" --report scan/report.json \
+            --state-dir state --out scan/selection.json --github-output
+
+      # One upload per tool, so each keeps its own code scanning category and alerts are
+      # closed correctly when a tool stops reporting them.
+      - name: Upload SARIF (trivy-fs)
+        if: inputs.code-scanning && hashFiles('scan/sarif/trivy-fs.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        with:
+          sarif_file: scan/sarif/trivy-fs.sarif
+          category: secubot/trivy-fs
+          checkout_path: ${{ github.workspace }}/target
+      - name: Upload SARIF (trivy-image)
+        if: inputs.code-scanning && hashFiles('scan/sarif/trivy-image.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        with:
+          sarif_file: scan/sarif/trivy-image.sarif
+          category: secubot/trivy-image
+          checkout_path: ${{ github.workspace }}/target
+      - name: Upload SARIF (govulncheck)
+        if: inputs.code-scanning && hashFiles('scan/sarif/govulncheck.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        with:
+          sarif_file: scan/sarif/govulncheck.sarif
+          category: secubot/govulncheck
+          checkout_path: ${{ github.workspace }}/target
+      - name: Upload SARIF (gosec)
+        if: inputs.code-scanning && hashFiles('scan/sarif/gosec.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        with:
+          sarif_file: scan/sarif/gosec.sarif
+          category: secubot/gosec
+          checkout_path: ${{ github.workspace }}/target
+      - name: Upload SARIF (bandit)
+        if: inputs.code-scanning && hashFiles('scan/sarif/bandit.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        with:
+          sarif_file: scan/sarif/bandit.sarif
+          category: secubot/bandit
+          checkout_path: ${{ github.workspace }}/target
+      - name: Upload SARIF (pip-audit)
+        if: inputs.code-scanning && hashFiles('scan/sarif/pip-audit.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        with:
+          sarif_file: scan/sarif/pip-audit.sarif
+          category: secubot/pip-audit
+          checkout_path: ${{ github.workspace }}/target
+      - name: Upload SARIF (semgrep)
+        if: inputs.code-scanning && hashFiles('scan/sarif/semgrep.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        with:
+          sarif_file: scan/sarif/semgrep.sarif
+          category: secubot/semgrep
+          checkout_path: ${{ github.workspace }}/target
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: secubot${{ inputs.instance }}-sarif
+          path: scan/sarif/
+          retention-days: 30
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: secubot${{ inputs.instance }}-scan
+          path: |
+            scan/report.json
+            scan/selection.json
+          retention-days: 30
+
+  triage:
+    needs: scan
+    if: needs.scan.outputs.has_work == 'true'
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    outputs:
+      fix_matrix: ${{ steps.triage.outputs.fix_matrix }}
+      has_fixes: ${{ steps.triage.outputs.has_fixes }}
+      has_publish: ${{ steps.triage.outputs.has_publish }}
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: >
+            api.anthropic.com:443
+            github.com:443 api.github.com:443 codeload.github.com:443
+            objects.githubusercontent.com:443 release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443 *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            pypi.org:443 files.pythonhosted.org:443
+            azure.archive.ubuntu.com:80 archive.ubuntu.com:80 security.ubuntu.com:80
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: target
+          ref: ${{ needs.scan.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.secubot-repository }}
+          ref: ${{ inputs.secubot-ref }}
+          token: ${{ secrets.SECUBOT_READ_TOKEN || github.token }}
+          path: secubot
+          persist-credentials: false
+      - uses: ./secubot/.github/actions/setup-secubot
+        with:
+          agent: "true"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: secubot${{ inputs.instance }}-scan
+          path: scan
+
+      - id: triage
+        name: Triage (read-only analysis + adversarial review)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CONFIG: ${{ inputs.config-path }}
+        run: |
+          secubot triage --repo target --config "$CONFIG" --scan-dir scan --out triage \
+            --github-output
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: secubot${{ inputs.instance }}-triage
+          path: triage/
+          retention-days: 30
+
+  fix:
+    needs: [scan, triage]
+    if: needs.triage.outputs.has_fixes == 'true'
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ inputs.max-parallel-fixes }}
+      matrix:
+        cluster: ${{ fromJSON(needs.triage.outputs.fix_matrix) }}
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: >
+            api.anthropic.com:443
+            github.com:443 api.github.com:443 codeload.github.com:443
+            objects.githubusercontent.com:443 release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443 *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            pypi.org:443 files.pythonhosted.org:443
+            proxy.golang.org:443 sum.golang.org:443 vuln.go.dev:443 storage.googleapis.com:443
+            go.dev:443 dl.google.com:443
+            mirror.gcr.io:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+            semgrep.dev:443
+            azure.archive.ubuntu.com:80 archive.ubuntu.com:80 security.ubuntu.com:80
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: target
+          ref: ${{ needs.scan.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.secubot-repository }}
+          ref: ${{ inputs.secubot-ref }}
+          token: ${{ secrets.SECUBOT_READ_TOKEN || github.token }}
+          path: secubot
+          persist-credentials: false
+      - uses: ./secubot/.github/actions/setup-secubot
+        with:
+          agent: "true"
+      - name: Set up Go
+        if: needs.scan.outputs.go == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: target/${{ inputs.go-version-file }}
+          cache: false
+      - name: Install pinned scanners
+        env:
+          TOOLS: ${{ needs.scan.outputs.tools }}
+          GOTOOLCHAIN: local
+        run: |
+          mapfile -t tools < <(jq -r '.[]' <<<"$TOOLS")
+          secubot/scripts/install-scanners.sh "${tools[@]}"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: secubot${{ inputs.instance }}-scan
+          path: scan
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: secubot${{ inputs.instance }}-triage
+          path: triage
+
+      - name: Fix, build, test, re-scan
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CONFIG: ${{ inputs.config-path }}
+          CLUSTER: ${{ matrix.cluster }}
+          TRIVY_CACHE_DIR: ${{ runner.temp }}/trivy-cache
+          SEMGREP_SEND_METRICS: "off"
+          GOTOOLCHAIN: local
+        run: |
+          [[ "$CLUSTER" =~ ^[0-9a-f]{12}$ ]] || { echo "bad cluster id"; exit 1; }
+          secubot fix --repo target --config "$CONFIG" --scan-dir scan --triage-dir triage \
+            --cluster "$CLUSTER" --out "fix/$CLUSTER"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: secubot${{ inputs.instance }}-fix-${{ matrix.cluster }}
+          path: |
+            fix/${{ matrix.cluster }}/result.json
+            fix/${{ matrix.cluster }}/patch.diff
+          if-no-files-found: ignore
+          retention-days: 30
+
+  publish:
+    needs: [scan, triage, fix]
+    if: >-
+      always() && needs.triage.result == 'success' &&
+      needs.triage.outputs.has_publish == 'true'
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 30
+    concurrency:
+      group: secfix-publish-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      contents: write # push secfix/* branches and the secfix-state branch
+      pull-requests: write # draft PRs
+      issues: write # issues for findings that need a human
+    env:
+      HAS_APP: ${{ secrets.SECUBOT_APP_ID != '' }}
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: >
+            github.com:443 api.github.com:443 codeload.github.com:443 uploads.github.com:443
+            objects.githubusercontent.com:443 release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443 *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            pypi.org:443 files.pythonhosted.org:443
+
+      - id: app
+        if: env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.SECUBOT_APP_ID }}
+          private-key: ${{ secrets.SECUBOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+
+      - name: Checkout target (with push credentials)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: target
+          ref: ${{ needs.scan.outputs.sha }}
+          token: ${{ steps.app.outputs.token || github.token }}
+          persist-credentials: true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.secubot-repository }}
+          ref: ${{ inputs.secubot-ref }}
+          token: ${{ secrets.SECUBOT_READ_TOKEN || github.token }}
+          path: secubot
+          persist-credentials: false
+      - uses: ./secubot/.github/actions/setup-secubot
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: secubot${{ inputs.instance }}-scan
+          path: scan
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: secubot${{ inputs.instance }}-triage
+          path: triage
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: secubot${{ inputs.instance }}-fix-*
+          path: fix
+
+      - name: Bot identity
+        id: ident
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          if [ -n "$APP_SLUG" ]; then
+            id=$(gh api "/users/${APP_SLUG}[bot]" --jq .id)
+            echo "name=${APP_SLUG}[bot]" >> "$GITHUB_OUTPUT"
+            echo "email=${id}+${APP_SLUG}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=github-actions[bot]" >> "$GITHUB_OUTPUT"
+            echo "email=41898282+github-actions[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish (validate patches, push branches, open draft PRs / issues)
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
+          CONFIG: ${{ inputs.config-path }}
+          BASE_BRANCH: ${{ needs.scan.outputs.ref_name }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          SECUBOT_GIT_NAME: ${{ steps.ident.outputs.name }}
+          SECUBOT_GIT_EMAIL: ${{ steps.ident.outputs.email }}
+        run: |
+          args=()
+          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          secubot publish --repo target --config "$CONFIG" --scan-dir scan --triage-dir triage \
+            --fix-dir fix --out publish --base-branch "$BASE_BRANCH" "${args[@]}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: secubot${{ inputs.instance }}-publish
+          path: publish/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  report:
+    needs: [scan, triage, fix, publish]
+    if: always() && needs.scan.result == 'success'
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: >
+            github.com:443 api.github.com:443 codeload.github.com:443
+            objects.githubusercontent.com:443 release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443 *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            pypi.org:443 files.pythonhosted.org:443
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.secubot-repository }}
+          ref: ${{ inputs.secubot-ref }}
+          token: ${{ secrets.SECUBOT_READ_TOKEN || github.token }}
+          path: secubot
+          persist-credentials: false
+      - uses: ./secubot/.github/actions/setup-secubot
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: secubot${{ inputs.instance }}-*
+          path: artifacts
+      - name: Job summary and run report
+        env:
+          P: artifacts/secubot${{ inputs.instance }}
+        run: |
+          secubot summary --scan-dir "$P-scan" --triage-dir "$P-triage" --fix-dir artifacts \
+            --publish-dir "$P-publish" --out report/run-report.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: secubot${{ inputs.instance }}-report
+          path: report/run-report.json
+          retention-days: 90

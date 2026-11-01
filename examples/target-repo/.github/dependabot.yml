@@ -1,0 +1,18 @@
+# Simple dependency bumps are Dependabot's job; secubot only takes code-level fixes and
+# breaking/major upgrades (policy.dependencies: breaking-only).
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
+    groups: { go: { patterns: ["*"], update-types: [minor, patch] } }
+  - package-ecosystem: uv # or `pip` for requirements.txt
+    directory: /
+    schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
+    groups: { python: { patterns: ["*"], update-types: [minor, patch] } }
+  - package-ecosystem: github-actions # also keeps the secubot `uses:` ref current
+    directory: /
+    schedule: { interval: weekly }
+    cooldown: { default-days: 7 }

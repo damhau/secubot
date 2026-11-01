@@ -1,0 +1,45 @@
+name: setup-secubot
+description: >
+  Install uv and secubot (from the checked-out central repository, using its lock file)
+  and put `secubot` on PATH. With `agent: true`, also install bubblewrap, which Claude Code
+  needs to isolate the commands it runs (CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).
+inputs:
+  path:
+    description: Where the secubot repository is checked out
+    default: secubot
+  agent:
+    description: Prepare the runner for a Claude Code session
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        version: "0.12.2"
+        enable-cache: false
+    - name: Install secubot
+      shell: bash
+      env:
+        SECUBOT_PATH: ${{ inputs.path }}
+      run: |
+        set -euo pipefail
+        uv sync --frozen --no-dev --python 3.12 --project "$SECUBOT_PATH"
+        mkdir -p "$RUNNER_TEMP/secubot-bin"
+        ln -sf "$GITHUB_WORKSPACE/$SECUBOT_PATH/.venv/bin/secubot" "$RUNNER_TEMP/secubot-bin/secubot"
+        echo "$RUNNER_TEMP/secubot-bin" >> "$GITHUB_PATH"
+        "$RUNNER_TEMP/secubot-bin/secubot" --version
+    - name: Install bubblewrap (agent sandbox)
+      if: inputs.agent == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v bwrap >/dev/null; then
+          # Only the Ubuntu archive sources (keeps the egress allowlist small).
+          sudo apt-get update -qq -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
+            -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
+          sudo apt-get install -y -qq --no-install-recommends bubblewrap
+        fi
+        # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor, which
+        # bubblewrap needs. The runner is ephemeral; this only affects this job.
+        sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+        bwrap --ro-bind / / --dev /dev true && echo "bubblewrap OK"

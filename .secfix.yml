@@ -1,0 +1,11 @@
+# secubot scanning itself.
+version: 1
+paths:
+  skip:
+    - tests/fixtures/
+commands:
+  setup: uv sync --frozen
+  test: uv run pytest -q
+policy:
+  min_severity: medium
+  max_prs: 1

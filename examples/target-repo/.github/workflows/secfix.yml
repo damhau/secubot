@@ -1,0 +1,13 @@
+name: secfix
+on:
+  schedule:
+    - cron: "23 3 * * *" # daily; pick a different minute/hour per repository
+  workflow_dispatch: # manual runs, and dispatch from the optional control plane
+permissions: {}
+concurrency: { group: secfix, cancel-in-progress: false }
+jobs:
+  secfix:
+    uses: YOUR_ORG/secubot/.github/workflows/secfix.yml@v1 # or @<sha> # v1.2.3
+    permissions: { contents: write, pull-requests: write, issues: write, security-events: write, actions: read }
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

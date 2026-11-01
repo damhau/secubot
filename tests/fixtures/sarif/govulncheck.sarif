@@ -1,0 +1,329 @@
+{
+ "version": "2.1.0",
+ "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+ "runs": [
+  {
+   "tool": {
+    "driver": {
+     "name": "govulncheck",
+     "semanticVersion": "v1.9.0",
+     "informationUri": "https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck",
+     "properties": {
+      "protocol_version": "v1.0.0",
+      "scanner_name": "govulncheck",
+      "scanner_version": "v1.9.0",
+      "db": "https://vuln.go.dev",
+      "db_last_modified": "2026-10-27T21:16:18Z",
+      "go_version": "go1.22.2",
+      "scan_level": "symbol",
+      "scan_mode": "source"
+     },
+     "rules": [
+      {
+       "id": "GO-2022-1059",
+       "shortDescription": {
+        "text": "[GO-2022-1059] Denial of service via crafted Accept-Language header in golang.org/x/text/language"
+       },
+       "fullDescription": {
+        "text": "Denial of service via crafted Accept-Language header in golang.org/x/text/language"
+       },
+       "help": {
+        "text": "An attacker may cause a denial of service by crafting an Accept-Language header which ParseAcceptLanguage will take significant time to parse."
+       },
+       "helpUri": "https://pkg.go.dev/vuln/GO-2022-1059",
+       "properties": {
+        "tags": [
+         "CVE-2022-32149",
+         "GHSA-69ch-w2m2-3vjp"
+        ]
+       }
+      },
+      {
+       "id": "GO-2024-2824",
+       "shortDescription": {
+        "text": "[GO-2024-2824] Malformed DNS message can cause infinite loop in net"
+       },
+       "fullDescription": {
+        "text": "Malformed DNS message can cause infinite loop in net"
+       },
+       "help": {
+        "text": "A malformed DNS message in response to a query can cause the Lookup functions to get stuck in an infinite loop."
+       },
+       "helpUri": "https://pkg.go.dev/vuln/GO-2024-2824",
+       "properties": {
+        "tags": [
+         "CVE-2024-24788"
+        ]
+       }
+      },
+      {
+       "id": "GO-2024-2887",
+       "shortDescription": {
+        "text": "[GO-2024-2887] Unexpected behavior from Is methods for IPv4-mapped IPv6 addresses in net/netip"
+       },
+       "fullDescription": {
+        "text": "Unexpected behavior from Is methods for IPv4-mapped IPv6 addresses in net/netip"
+       },
+       "help": {
+        "text": "The various Is methods (IsPrivate, IsLoopback, etc) did not work as expected for IPv4-mapped IPv6 addresses, returning false for addresses which would return true in their traditional IPv4 forms."
+       },
+       "helpUri": "https://pkg.go.dev/vuln/GO-2024-2887",
+       "properties": {
+        "tags": [
+         "CVE-2024-24790"
+        ]
+       }
+      },
+      {
+       "id": "GO-2024-2888",
+       "shortDescription": {
+        "text": "[GO-2024-2888] Mishandling of corrupt central directory record in archive/zip"
+       },
+       "fullDescription": {
+        "text": "Mishandling of corrupt central directory record in archive/zip"
+       },
+       "help": {
+        "text": "The archive/zip package's handling of certain types of invalid zip files differs from the behavior of most zip implementations. This misalignment could be exploited to create an zip file with contents that vary depending on the implementation reading the file. The archive/zip package now rejects files containing these errors."
+       },
+       "helpUri": "https://pkg.go.dev/vuln/GO-2024-2888",
+       "properties": {
+        "tags": [
+         "CVE-2024-24789"
+        ]
+       }
+      },
+      {
+       "id": "GO-2024-3105",
+       "shortDescription": {
+        "text": "[GO-2024-3105] Stack exhaustion in all Parse functions in go/parser"
+       },
+       "fullDescription": {
+        "text": "Stack exhaustion in all Parse functions in go/parser"
+       },
+       "help": {
+        "text": "Calling any of the Parse functions on Go source code which contains deeply nested literals can cause a panic due to stack exhaustion."
+       },
+       "helpUri": "https://pkg.go.dev/vuln/GO-2024-3105",
+       "properties": {
+        "tags": [
+         "CVE-2024-34155"
+        ]
+       }
+      }
+     ]
+    }
+   },
+   "results": [
+    {
+     "ruleId": "GO-2022-1059",
+     "level": "error",
+     "message": {
+      "text": "Your code calls vulnerable functions in 1 package (golang.org/x/text/language)."
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "go.mod",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 1
+        }
+       },
+       "message": {
+        "text": "Findings for vulnerability GO-2022-1059"
+       }
+      }
+     ],
+     "codeFlows": [
+      {
+       "threadFlows": [
+        {
+         "locations": [
+          {
+           "module": "example.com/goapp@",
+           "location": {
+            "physicalLocation": {
+             "artifactLocation": {
+              "uri": "main.go",
+              "uriBaseId": "%SRCROOT%"
+             },
+             "region": {
+              "startLine": 29,
+              "startColumn": 44
+             }
+            },
+            "message": {
+             "text": "example.com/goapp.main"
+            }
+           }
+          },
+          {
+           "module": "golang.org/x/text@v0.3.7",
+           "location": {
+            "physicalLocation": {
+             "artifactLocation": {
+              "uri": "golang.org/x/text@v0.3.7/language/parse.go",
+              "uriBaseId": "%GOMODCACHE%"
+             },
+             "region": {
+              "startLine": 158,
+              "startColumn": 6
+             }
+            },
+            "message": {
+             "text": "golang.org/x/text/language.ParseAcceptLanguage"
+            }
+           }
+          }
+         ]
+        }
+       ],
+       "message": {
+        "text": "A summarized code flow for vulnerable function golang.org/x/text/language.ParseAcceptLanguage"
+       }
+      }
+     ],
+     "stacks": [
+      {
+       "message": {
+        "text": "A call stack for vulnerable function golang.org/x/text/language.ParseAcceptLanguage"
+       },
+       "frames": [
+        {
+         "module": "example.com/goapp@",
+         "location": {
+          "physicalLocation": {
+           "artifactLocation": {
+            "uri": "main.go",
+            "uriBaseId": "%SRCROOT%"
+           },
+           "region": {
+            "startLine": 29,
+            "startColumn": 44
+           }
+          },
+          "message": {
+           "text": "example.com/goapp.main"
+          }
+         }
+        },
+        {
+         "module": "golang.org/x/text@v0.3.7",
+         "location": {
+          "physicalLocation": {
+           "artifactLocation": {
+            "uri": "golang.org/x/text@v0.3.7/language/parse.go",
+            "uriBaseId": "%GOMODCACHE%"
+           },
+           "region": {
+            "startLine": 158,
+            "startColumn": 6
+           }
+          },
+          "message": {
+           "text": "golang.org/x/text/language.ParseAcceptLanguage"
+          }
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "ruleId": "GO-2024-2824",
+     "level": "warning",
+     "message": {
+      "text": "Your code imports 1 vulnerable package (net), but doesn\u2019t appear to call any of the vulnerable symbols."
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "go.mod",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 1
+        }
+       },
+       "message": {
+        "text": "Findings for vulnerability GO-2024-2824"
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "GO-2024-2887",
+     "level": "warning",
+     "message": {
+      "text": "Your code imports 1 vulnerable package (net/netip), but doesn\u2019t appear to call any of the vulnerable symbols."
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "go.mod",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 1
+        }
+       },
+       "message": {
+        "text": "Findings for vulnerability GO-2024-2887"
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "GO-2024-2888",
+     "level": "note",
+     "message": {
+      "text": "Your code depends on 1 vulnerable module (stdlib), but doesn't appear to call any of the vulnerable symbols."
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "go.mod",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 1
+        }
+       },
+       "message": {
+        "text": "Findings for vulnerability GO-2024-2888"
+       }
+      }
+     ]
+    },
+    {
+     "ruleId": "GO-2024-3105",
+     "level": "note",
+     "message": {
+      "text": "Your code depends on 1 vulnerable module (stdlib), but doesn't appear to call any of the vulnerable symbols."
+     },
+     "locations": [
+      {
+       "physicalLocation": {
+        "artifactLocation": {
+         "uri": "go.mod",
+         "uriBaseId": "%SRCROOT%"
+        },
+        "region": {
+         "startLine": 1
+        }
+       },
+       "message": {
+        "text": "Findings for vulnerability GO-2024-3105"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

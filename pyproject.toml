@@ -1,0 +1,46 @@
+[project]
+name = "secubot"
+version = "0.1.0"
+description = "Scheduled security pipeline: deterministic scanners -> dedup -> Claude triage (with adversarial verification) -> Claude fix -> draft PR."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+    "claude-agent-sdk>=0.2.170",
+    "packaging>=24.0",
+    "pathspec>=1.0",
+    "pydantic>=2.10",
+    "pyyaml>=6.0.2",
+]
+
+[project.scripts]
+secubot = "secubot.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["uv_build>=0.9,<0.13"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["tests/fixtures"] # deliberately vulnerable sample code
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "SIM"]
+ignore = [
+    "S603", # subprocess without shell=True is what we want
+    "S607", # tools are resolved from PATH on purpose (pinned installs)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S108"]
