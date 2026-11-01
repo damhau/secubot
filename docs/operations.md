@@ -134,7 +134,8 @@ Ways to cut cost:
 |---|---|
 | publish: `GitHub Actions is not permitted to create or approve pull requests` | Enable the repository setting, or configure the GitHub App ([onboarding](onboarding.md#3-github-app-for-publish-recommended)) |
 | SARIF upload: `Advanced Security must be enabled` / `Code scanning is not enabled` | Private repository without GitHub Code Security: set `code-scanning: false` |
-| `bwrap: setting up uid map: Permission denied` / `No permissions to create new namespace` | Unprivileged user namespaces are blocked. The setup action sets `kernel.apparmor_restrict_unprivileged_userns=0` on hosted Ubuntu runners. On self-hosted runners, install `bubblewrap` and allow user namespaces |
+| `bwrap: setting up uid map: Permission denied` / `No permissions to create new namespace` | Unprivileged user namespaces are blocked. The setup action sets `kernel.apparmor_restrict_unprivileged_userns=0` on hosted Ubuntu runners. On self-hosted runners, install `bubblewrap` and `socat` and allow user namespaces |
+| Fix result `blocked`: `Sandbox dependencies not available: socat not installed` | The agent's command sandbox needs `bubblewrap` and `socat`. The setup action installs both on hosted runners; on self-hosted runners, preinstall them |
 | A step fails with a connection error under `egress-policy: block` | Look at the harden-runner insights for the blocked host. If the repository needs it (private registry, Go proxy), add it to your fork of the workflow. Use `audit` to find all of them at once |
 | Triage result `error` | Usually the session budget or turn limit (`error_max_budget_usd` / `error_max_turns` in the triage artifact). Raise `triage_budget_usd` / `triage_max_turns`, or check the API key. Errors are retried on the next run |
 | Every fix `failed` | Build/test don't work on a fresh runner. Set `commands.setup`, and check the fix job's logs and the `fix-<id>` artifact (attempt outputs) |

@@ -102,6 +102,7 @@ class Source(BaseModel):
     rule_id: str
     level: str = "warning"
     message: str = ""
+    description: str = ""  # the rule's advisory text (what is vulnerable, under which conditions)
     help_uri: str | None = None
 
 

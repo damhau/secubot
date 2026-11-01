@@ -178,6 +178,21 @@ def _rule_for(result: dict[str, Any], rules: list[dict[str, Any]]) -> dict[str, 
     return {}
 
 
+def _rule_description(rule: dict[str, Any], message: str) -> str:
+    """The advisory text of a rule: which function or configuration is affected and when.
+
+    Dependency scanners put it in fullDescription/help, not in the result message, and
+    triage needs it to judge reachability. Context only: ids are never extracted from it.
+    """
+    text = _text(rule.get("fullDescription"))
+    if len(text) < 40:  # some tools only fill `help` (trivy repeats its metadata there)
+        text = _text(rule.get("help")) or text
+    text = re.sub(r"[ \t]+", " ", text).strip()
+    if not text or text in message:
+        return ""
+    return text[:1500]
+
+
 def _rule_cwes(rule: dict[str, Any]) -> list[str]:
     cwes = []
     for rel in rule.get("relationships", []) or []:
@@ -459,6 +474,7 @@ def _parse_result(
                 level=level,
                 # Secret findings: scanner messages can echo the credential (bandit B105 does).
                 message=(title if kind == Kind.SECRET else message)[:2000],
+                description="" if kind == Kind.SECRET else _rule_description(rule, message),
                 help_uri=rule.get("helpUri"),
             )
         ],

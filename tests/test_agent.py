@@ -23,7 +23,7 @@ def test_options_are_hardened(tmp_path: Path):
     assert o.tools == ["Glob", "Grep", "Read", "Edit", "Bash"]
     assert "Bash(make test)" in o.allowed_tools and "Bash" not in o.allowed_tools
     assert {"WebFetch", "WebSearch", "Task"} <= set(o.disallowed_tools)
-    assert o.permission_mode == "dontAsk"
+    assert o.permission_mode == "default"
     assert o.setting_sources == []
     assert o.strict_mcp_config is True and o.mcp_servers == {}
     assert o.extra_args == {"restricted": None}
@@ -32,6 +32,7 @@ def test_options_are_hardened(tmp_path: Path):
     assert set(AGENT_ENV) <= set(o.env)
     assert o.max_turns == 7 and o.max_budget_usd == 1.5 and o.effort == "high"
     assert o.output_format == {"type": "json_schema", "schema": {"type": "object"}}
+    assert "StructuredOutput" in o.allowed_tools
     assert len(o.hooks["PreToolUse"]) == 1
 
 

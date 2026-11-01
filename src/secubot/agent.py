@@ -7,7 +7,8 @@ between phases:
     explicitly listed, user/project/local settings files ignored;
   * `setting_sources=[]`: no `.claude/settings.json`, no hooks, no CLAUDE.md from the repo;
   * `strict_mcp_config` + no servers: a repo-supplied `.mcp.json` is never loaded;
-  * explicit `tools` list + `permission_mode="dontAsk"` + the PreToolUse gate;
+  * explicit `tools` list + `allowed_tools` rules (headless: nothing else is approved)
+    + the PreToolUse gate;
   * `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`: Anthropic/cloud credentials are stripped from the
     environment of anything the Bash tool runs;
   * non-essential traffic disabled, so the only endpoint needed is the Anthropic API.
@@ -92,7 +93,10 @@ def build_options(spec: SessionSpec):
         tools=policy.tools,
         allowed_tools=policy.allowed_tools,
         disallowed_tools=list(DISALLOWED_TOOLS),
-        permission_mode="dontAsk",
+        # Not "dontAsk": with CLAUDE_CODE_SUBPROCESS_ENV_SCRUB set, Claude Code forces the
+        # mode to "default" anyway (and warns). In a headless session "default" refuses
+        # every tool call that no allowed_tools rule pre-approves, so the effect is the same.
+        permission_mode="default",
         setting_sources=[],
         strict_mcp_config=True,
         mcp_servers={},
@@ -106,6 +110,7 @@ def build_options(spec: SessionSpec):
     )
     if spec.output_schema is not None:
         options.output_format = {"type": "json_schema", "schema": spec.output_schema}
+        options.allowed_tools = [*options.allowed_tools, "StructuredOutput"]
     return options
 
 

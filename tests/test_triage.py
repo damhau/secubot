@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import json
 
 import pytest
 from conftest import cluster_by
@@ -100,3 +101,15 @@ def test_untrusted_tags_cannot_be_closed_from_data(report, project):
     prompt = factory.prompts[0][0]
     assert prompt.count("</untrusted>") == 1
     assert "[tag removed]" in prompt
+
+
+def test_prompt_carries_advisory_text_once(report, project):
+    from secubot import prompts
+
+    cluster = cluster_by(report, package="golang.org/x/text", tool="trivy-fs")
+    block = prompts.finding_block(cluster)
+    texts = {s.description for f in cluster.findings for s in f.sources if s.description}
+    assert texts, "fixture advisories expected"
+    payload = json.loads(block.split("```json\n", 1)[1].rsplit("\n```", 1)[0])
+    shown = [a["text"] for loc in payload["locations"] for a in loc.get("advisories", [])]
+    assert sorted(shown) == sorted(texts)  # every advisory, each exactly once

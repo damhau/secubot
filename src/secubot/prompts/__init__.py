@@ -55,6 +55,7 @@ def finding_block(cluster: Cluster) -> str:
             breaking_upgrade=cluster.breaking_upgrade,
         )
     locations = []
+    seen_advisories: set[str] = set()  # one copy per rule text, not per location
     for f in cluster.findings[:15]:
         loc = {
             "path": f.path,
@@ -70,6 +71,12 @@ def finding_block(cluster: Cluster) -> str:
                 for s in f.sources[:5]
             ],
         }
+        advisories = []
+        for s in f.sources[:5]:
+            if s.description and s.description not in seen_advisories:
+                seen_advisories.add(s.description)
+                advisories.append({"rule": s.rule_id, "text": s.description})
+        loc["advisories"] = advisories
         locations.append({k: v for k, v in loc.items() if v not in (None, [], "")})
     body = json.dumps({"facts": facts, "locations": locations}, indent=2, ensure_ascii=False)
     return (

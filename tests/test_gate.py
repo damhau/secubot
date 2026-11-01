@@ -92,3 +92,10 @@ def test_custom_protected_paths(tmp_path):
     spec = pathspec.PathSpec.from_lines("gitignore", ["deploy/"])
     g = Gate(GatePolicy(root=tmp_path, allow_edit=True, protected=spec))
     assert not g.check("Edit", {"file_path": "deploy/prod.tf"}).allowed
+
+
+def test_structured_output_is_always_allowed(tmp_path):
+    # Claude Code adds StructuredOutput when a JSON schema is requested; denying it made the
+    # agent answer in plain text (first real run).
+    gate = Gate(GatePolicy(root=tmp_path))
+    assert gate.check("StructuredOutput", {"verdict": "true_positive"}).allowed

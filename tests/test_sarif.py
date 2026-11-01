@@ -178,3 +178,14 @@ def test_secret_findings_are_redacted(tmp_path, project):
     dumped = finding.model_dump_json()
     assert "AKIAABCDEFGHIJKLMNOP" not in dumped
     assert finding.anchor
+
+
+def test_advisory_text_is_kept_for_triage(tmp_path, project):
+    # pip-audit/trivy put "which function, under which conditions" in the rule description,
+    # not in the result message. Triage needs it to judge reachability (first real run).
+    findings = _parse(tmp_path, "trivy-fs", project)
+    cve = next(f for f in findings if "CVE-2022-32149" in f.vuln_ids)
+    assert "Accept-Language" in cve.sources[0].description
+    assert len(cve.sources[0].description) <= 1500
+    secrets = [f for f in findings if f.kind == Kind.SECRET]
+    assert all(s.description == "" for f in secrets for s in f.sources)

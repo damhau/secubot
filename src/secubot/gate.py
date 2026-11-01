@@ -3,7 +3,7 @@
 This is the last line of defence inside the agent process, on top of:
   * Claude Code `--restricted` mode (file tools confined to the working directory),
   * an explicit `tools` list (tools not listed do not exist in the session),
-  * `permission_mode="dontAsk"` (anything not pre-approved is denied),
+  * permission rules (`allowed_tools`; anything else is refused, there is nobody to ask),
   * no filesystem settings, no MCP servers, no CLAUDE.md.
 
 The gate is deliberately simple and deny-by-default so it can be audited in one read. If
@@ -24,6 +24,9 @@ import pathspec
 READ_TOOLS = {"Read", "Grep", "Glob"}
 EDIT_TOOLS = {"Edit", "MultiEdit"}
 WRITE_TOOLS = {"Write"}
+# Added by Claude Code when a JSON-schema output format is set: its input *is* the final
+# answer, it has no side effects. Denying it makes the agent fall back to plain text.
+OUTPUT_TOOLS = {"StructuredOutput"}
 SHELL_METACHARS = re.compile(r"[;&|`$<>(){}\[\]\\\n\r*?!#~'\"]")
 
 
@@ -131,6 +134,8 @@ class Gate:
         return decision
 
     def _check(self, tool_name: str, ti: dict[str, Any]) -> GateDecision:
+        if tool_name in OUTPUT_TOOLS:
+            return GateDecision(True)
         if tool_name == "Read":
             return self._check_path(ti.get("file_path"), write=False)
         if tool_name == "Grep":

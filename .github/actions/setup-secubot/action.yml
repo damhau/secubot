@@ -1,7 +1,7 @@
 name: setup-secubot
 description: >
   Install uv and secubot (from the checked-out central repository, using its lock file)
-  and put `secubot` on PATH. With `agent: true`, also install bubblewrap, which Claude Code
+  and put `secubot` on PATH. With `agent: true`, also install bubblewrap and socat, which Claude Code
   needs to isolate the commands it runs (CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).
 inputs:
   path:
@@ -33,13 +33,16 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        if ! command -v bwrap >/dev/null; then
+        # Claude Code's command sandbox needs both. Without them every Bash call the agent
+        # makes fails ("Sandbox dependencies not available"), so fixes can't run uv/go/tests.
+        if ! command -v bwrap >/dev/null || ! command -v socat >/dev/null; then
           # Only the Ubuntu archive sources (keeps the egress allowlist small).
           sudo apt-get update -qq -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
             -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0
-          sudo apt-get install -y -qq --no-install-recommends bubblewrap
+          sudo apt-get install -y -qq --no-install-recommends bubblewrap socat
         fi
         # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor, which
         # bubblewrap needs. The runner is ephemeral; this only affects this job.
         sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0 || true
         bwrap --ro-bind / / --dev /dev true && echo "bubblewrap OK"
+        socat -V >/dev/null && echo "socat OK"
