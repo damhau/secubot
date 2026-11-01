@@ -166,6 +166,16 @@ def reconcile(
                 ),
             )
         return final, "suppress", why
+    if (
+        cfg.policy.bump_uncertain_dependencies
+        and cluster.kind == Kind.DEPENDENCY
+        and cluster.target_version
+        and cluster.breaking_upgrade is False
+    ):
+        # Proving (un)reachability costs more than a verified minor/patch bump, and a
+        # dependency bot would open this PR without any analysis.
+        bump = f"non-breaking upgrade to {cluster.target_version} available, so fix anyway"
+        return final, "fix", f"{why}; {bump}"
     return final, "issue", why
 
 

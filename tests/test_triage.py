@@ -36,6 +36,30 @@ def test_reconcile_table(report, a, c, verdict, action):
     assert got[:2] == (verdict, action)
 
 
+def test_uncertain_dependency_gets_a_non_breaking_bump(report):
+    dep = next(c for c in report.clusters if c.kind == Kind.DEPENDENCY and c.target_version)
+    unsure = Analysis.model_validate(analysis("uncertain"))
+    agree = Challenge.model_validate(challenge(False, "uncertain"))
+    minor = dep.model_copy(update={"breaking_upgrade": False})
+    final, action, why = reconcile(minor, unsure, agree, SecfixConfig())
+    assert (final, action) == ("uncertain", "fix") and dep.target_version in why
+    major = dep.model_copy(update={"breaking_upgrade": True})
+    assert reconcile(major, unsure, agree, SecfixConfig())[1] == "issue"
+    unknown = dep.model_copy(update={"breaking_upgrade": None})
+    assert reconcile(unknown, unsure, agree, SecfixConfig())[1] == "issue"
+    no_fix = minor.model_copy(update={"target_version": None})
+    assert reconcile(no_fix, unsure, agree, SecfixConfig())[1] == "issue"
+    off = SecfixConfig.model_validate({"policy": {"bump_uncertain_dependencies": False}})
+    assert reconcile(minor, unsure, agree, off)[1] == "issue"
+    code = cluster_by(report, path="goapp/main.go", line=19)
+    assert reconcile(code, unsure, agree, SecfixConfig())[1] == "issue"
+    # a false positive is never bumped "anyway"
+    fp = Analysis.model_validate(analysis("false_positive"))
+    fp_agree = Challenge.model_validate(challenge(False, "false_positive"))
+    crit = minor.model_copy(update={"severity": Severity.CRITICAL})
+    assert reconcile(crit, fp, fp_agree, SecfixConfig())[1] == "issue"
+
+
 def test_reconcile_guards(report):
     cluster = cluster_by(report, path="goapp/main.go", line=19)  # high severity
     cfg = SecfixConfig()  # auto_suppress_max_severity: high

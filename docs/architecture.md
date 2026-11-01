@@ -141,9 +141,11 @@ Each selected cluster gets two **fresh** Claude Code sessions with read-only too
 | TP | **fix** |
 | FP, `auto_suppress` on, severity ≤ `auto_suppress_max_severity` | **suppress** for `suppression_ttl_days`, with the reasoning as the reason |
 | FP otherwise | **issue** asking a human to confirm |
-| uncertain | **issue** |
+| uncertain, kind `dependency`, non-breaking upgrade to a fixed version, `bump_uncertain_dependencies` on | **fix**: a verified bump is cheaper than proving reachability |
+| uncertain otherwise | **issue** |
 
-The rule throughout is that disagreement goes to a human. Suppressions always expire, so a
+The rule throughout is that disagreement goes to a human, except for that one case: a
+minor or patch bump is still a draft PR that must pass build, test and rescan. Suppressions always expire, so a
 wrong one is re-examined within 30 days by default.
 
 ## 4. Fix

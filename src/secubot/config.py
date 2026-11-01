@@ -118,6 +118,9 @@ class Policy(_Strict):
     dependencies: Literal["all", "breaking-only", "none"] = "breaking-only"
     """`breaking-only` leaves simple bumps to Renovate/Dependabot and only takes upgrades that
     cross a major version (or 0.x minor) or have no fixed version but are reachable."""
+    bump_uncertain_dependencies: bool = True
+    """When triage can't settle a dependency finding, still try the upgrade (draft PR, verified
+    by build/test/rescan) if it is non-breaking and has a fixed version. Otherwise: an issue."""
     auto_suppress: bool = True
     """Record agreed false positives in the state branch instead of opening anything."""
     auto_suppress_max_severity: Severity = Severity.HIGH

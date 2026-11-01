@@ -16,6 +16,7 @@ flowchart LR
   TR -->|false positive| SUP[(secfix-state<br/>suppressions + expiry)]
   TR -->|uncertain / secret / injection| ISS[issue]
   TR -->|true positive| FX["4 · fix (matrix)<br/>Claude, narrow tools<br/>build · test · rescan · ≤3 tries"]
+  TR -->|uncertain dependency, minor/patch bump| FX
   FX -->|failed / blocked| ISS
   FX -->|verified patch| PUB["5 · publish (no model)<br/>re-validate patch<br/>branch secfix/&lt;id&gt;"]
   PUB --> PR[draft PR · label security]

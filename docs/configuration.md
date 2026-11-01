@@ -112,6 +112,7 @@ Go scanners run only when Go is detected, Python scanners only when Python is.
 | `kinds` | `[code, dependency, iac, secret]` | `license` findings are reported but never acted on |
 | `skip_unreachable` | `true` | drop Go dependency findings that govulncheck proved are not called |
 | `dependencies` | `breaking-only` | `all`, `breaking-only`, or `none`. `breaking-only` leaves non-breaking upgrades to Renovate/Dependabot. It takes upgrades across a major version (or a 0.x minor), and reachable vulnerabilities without a fixed version |
+| `bump_uncertain_dependencies` | `true` | when triage ends `uncertain` on a dependency with a fixed version and the upgrade is non-breaking, attempt the bump anyway (draft PR, verified by build/test/rescan). Major (breaking) upgrades and findings without a fixed version still become issues |
 | `auto_suppress` | `true` | record agreed false positives on `secfix-state` |
 | `auto_suppress_max_severity` | `high` | above this, an agreed false positive becomes an issue for a human to confirm |
 | `suppression_ttl_days` | `30` | lifetime of automatic suppressions |

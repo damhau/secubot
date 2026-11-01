@@ -40,6 +40,7 @@ policy:
   kinds: [code, dependency, iac, secret]
   skip_unreachable: true # drop deps govulncheck proved are not called
   dependencies: breaking-only # all | breaking-only | none (simple bumps = Dependabot/Renovate)
+  bump_uncertain_dependencies: true # uncertain + non-breaking upgrade: try the bump anyway
   auto_suppress: true
   auto_suppress_max_severity: high # agreed FPs above this become issues instead
   suppression_ttl_days: 30
