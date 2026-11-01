@@ -309,9 +309,19 @@ def cmd_summary(args) -> int:
             fr = FixResult.model_validate_json(f.read_text())
             fixes[fr.cluster_id] = fr
     actions = []
+    published: dict = {}
     if args.publish_dir and (Path(args.publish_dir) / "publish.json").is_file():
-        actions = json.loads((Path(args.publish_dir) / "publish.json").read_text())["actions"]
-    md = render.summary_markdown(report, selection, triage, fixes, actions)
+        published = json.loads((Path(args.publish_dir) / "publish.json").read_text())
+        actions = published.get("actions", [])
+    md = render.summary_markdown(
+        report,
+        selection,
+        triage,
+        fixes,
+        actions,
+        repository=published.get("repository") or os.environ.get("GITHUB_REPOSITORY", ""),
+        dry_run=bool(published.get("dry_run")),
+    )
     target = os.environ.get("GITHUB_STEP_SUMMARY")
     if target:
         with open(target, "a", encoding="utf-8") as fh:

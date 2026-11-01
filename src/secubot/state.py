@@ -146,6 +146,23 @@ class Decision(BaseModel):
     cluster_id: str
     selected: bool
     reason: str
+    group: str = ""
+    """Stable key for the reason (see SKIP_GROUPS), used to summarise skipped clusters."""
+
+
+# Why a cluster was not triaged, in the order the run summary lists them.
+SKIP_GROUPS = {
+    "cap": "Over the per-run limit (`policy.max_triage`), next run",
+    "in_flight": "Already in progress (secfix branch, open PR or issue)",
+    "cooldown": "Closed recently, cooling down (`policy.cooldown_days`)",
+    "suppressed": "Suppressed",
+    "dependency": "Dependencies not taken (`policy.dependencies`, or no fixed version)",
+    "protected": "CI/agent config (GitHub Actions…): report only, see Code Scanning. "
+    "Hide with `paths.ignore_protected`",
+    "unreachable": "Not reachable (govulncheck)",
+    "severity": "Below `policy.min_severity`",
+    "kind": "Kind not enabled (`policy.kinds`) or licence (report only)",
+}
 
 
 class Selection(BaseModel):
@@ -211,42 +228,55 @@ def select(
     eligible: list[Cluster] = []
     for c in report.clusters:
         reason = None
+        group = ""
         if c.paths and all(protected.match_file(p) for p in c.paths):
             # e.g. unpinned actions in .github/workflows: secubot may never edit these, so
             # triage would only spend money. They stay visible in Code Scanning.
+            group = "protected"
             reason = "in a protected path (report only: secubot never edits CI/agent config)"
         elif c.kind not in policy.kinds:
+            group = "kind"
             reason = f"kind '{c.kind.value}' not enabled (policy.kinds)"
         elif c.kind == Kind.LICENSE:
+            group = "kind"
             reason = "licence findings are reported only"
         elif c.severity.rank < policy.min_severity.rank:
+            group = "severity"
             reason = f"severity {c.severity.value} below policy.min_severity"
         elif hit := next((s for s in active if suppression_matches(s, c)), None):
+            group = "suppressed"
             reason = f"suppressed until {hit.expires} ({hit.source}): {hit.reason}"
         elif c.branch in state.branches:
+            group = "in_flight"
             reason = f"branch {c.branch} already exists (in flight)"
         elif any(p.state == "OPEN" for p in pulls_by_head.get(c.branch, [])):
+            group = "in_flight"
             reason = "open pull request"
         elif any(
             p.state == "CLOSED" and _recent(p.closed_at, policy.cooldown_days, now)
             for p in pulls_by_head.get(c.branch, [])
         ):
+            group = "cooldown"
             reason = f"pull request closed without merge less than {policy.cooldown_days}d ago"
         elif any(i.state == "OPEN" for i in issues_by_id.get(c.id, [])):
+            group = "in_flight"
             reason = "open issue"
         elif any(
             i.state == "CLOSED" and _recent(i.closed_at, policy.cooldown_days, now)
             for i in issues_by_id.get(c.id, [])
         ):
+            group = "cooldown"
             reason = f"issue closed less than {policy.cooldown_days}d ago"
         elif (
             policy.skip_unreachable and c.kind == Kind.DEPENDENCY and c.reachable == Reachability.NO
         ):
+            group = "unreachable"
             reason = "not reachable (govulncheck: vulnerable symbols are not called)"
         elif c.kind == Kind.DEPENDENCY:
+            group = "dependency"
             reason = _dependency_reason(c, policy.dependencies)
         if reason:
-            decisions.append(Decision(cluster_id=c.id, selected=False, reason=reason))
+            decisions.append(Decision(cluster_id=c.id, selected=False, reason=reason, group=group))
         else:
             eligible.append(c)
 
@@ -260,7 +290,12 @@ def select(
         decisions.append(Decision(cluster_id=c.id, selected=True, reason="selected"))
     for c in eligible[policy.max_triage :]:
         decisions.append(
-            Decision(cluster_id=c.id, selected=False, reason="over the per-run cap (max_triage)")
+            Decision(
+                cluster_id=c.id,
+                selected=False,
+                reason="over the per-run cap (max_triage)",
+                group="cap",
+            )
         )
     return Selection(
         selected=[c.id for c in selected], decisions=decisions, expired_suppressions=expired

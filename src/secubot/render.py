@@ -280,39 +280,231 @@ def issue_body(
     return "\n\n".join(parts)[:65000]
 
 
+VERDICTS = {"true_positive": "real", "false_positive": "false positive", "uncertain": "uncertain"}
+STEP_LABELS = {"build": "build", "test": "tests", "rescan": "rescan"}
+NO_EXAMPLES = {"severity", "kind"}
+
+
+def short(text: str | None, limit: int = 90) -> str:
+    """One line for a table cell, cut on a word boundary with an ellipsis."""
+    one = " ".join(_CONTROL.sub("", text or "").split())
+    if len(one) > limit:
+        cut = one[: limit - 1]
+        space = cut.rfind(" ")
+        if space > limit // 2:
+            cut = cut[:space]
+        one = cut.rstrip(" ,.;:-") + "…"
+    return inline(one, limit + 10)
+
+
+def _label(c: Cluster) -> str:
+    """What the finding is, without its location: `anyio 4.13.0 → 4.14.2`, a rule title."""
+    if c.kind == Kind.DEPENDENCY and c.package:
+        return f"{c.package} {c.installed_version or '?'} → {c.target_version or 'no fix yet'}"
+    return re.sub(r"\s*\([^()]*:\d+\)$", "", c.title)
+
+
+def _finding_cell(c: Cluster) -> str:
+    if c.kind == Kind.DEPENDENCY and c.package:
+        cves = [v for v in c.vuln_ids if v.startswith("CVE-")] or c.vuln_ids  # aliases: noise
+        ids = ", ".join(cves[:3]) + (f" +{len(cves) - 3}" if len(cves) > 3 else "")
+        head = f"**{short(c.package, 40)}** {short(_label(c)[len(c.package) + 1 :], 50)}"
+        return f"{head}<br>{short(ids, 80)}" if ids else head
+    loc = f"{c.path}:{c.start_line}" if c.start_line else c.path
+    return f"**{short(_label(c), 70)}**<br>{code(loc)}"
+
+
+def _checks(fix: FixResult) -> str:
+    steps = fix.attempts[-1].steps if fix.attempts else []
+    return " · ".join(
+        f"{STEP_LABELS.get(st.name, short(st.name, 20))} {'✓' if st.ok else '✗'}" for st in steps
+    )
+
+
+def _issue_why(c: Cluster, t: TriageResult | None, fix: FixResult | None) -> str:
+    if fix and fix.status != "fixed":
+        return f"fix {fix.status}, {short(fix.reason, 70)}"
+    if t is None:
+        return ""
+    if "prompt injection" in t.reason:
+        return "possible prompt injection, read the cited file"
+    if c.kind == Kind.SECRET:
+        return "rotate the secret, then remove it"
+    if t.final_verdict == "false_positive":
+        if "auto-suppression disabled" in t.reason:
+            return "confirm the false positive (auto-suppression is off)"
+        return f"confirm the false positive ({c.severity.value}: too severe to auto-suppress)"
+    if t.final_verdict == "uncertain":
+        return "triage could not decide, needs a human"
+    return short(t.reason, 70)
+
+
+def _outcome(
+    c: Cluster, t: TriageResult | None, fix: FixResult | None, acts: list[dict], dry_run: bool
+) -> str:
+    by_type = {a.get("type"): a for a in acts}
+
+    def link(kind: str, label: str) -> str:
+        url = str(by_type[kind].get("url") or "")
+        if url.startswith("https://"):
+            return f"[{label}]({url})"
+        return f"{label} (dry run)" if dry_run else label
+
+    if "pull_request" in by_type:
+        checks = _checks(fix) if fix else ""
+        return link("pull_request", "draft PR") + (f": {checks}" if checks else "")
+    if "issue" in by_type:
+        why = _issue_why(c, t, fix)
+        return link("issue", "issue") + (f": {why}" if why else "")
+    if "suppressed" in by_type:
+        return "suppressed" + (" (dry run)" if dry_run else "")
+    if "deferred" in by_type:
+        return "next run (`policy.max_prs`, or the fix job failed)"
+    for kind in ("error", "retry"):
+        if kind in by_type:
+            return f"{kind}: {short(by_type[kind].get('detail'), 80)}"
+    if t is None:
+        return "not triaged"
+    if t.action == "fix" and fix:
+        return f"fix {fix.status}"
+    return t.action  # publish did not run
+
+
+def _verdict(t: TriageResult) -> str:
+    if t.action == "error":
+        return "triage error"
+    verdict = VERDICTS.get(t.final_verdict or "", t.final_verdict or "?")
+    conf = t.analysis.confidence if t.analysis else ""
+    return f"{verdict} ({conf})" if conf else verdict
+
+
+def _examples(clusters: list[Cluster], limit: int = 3) -> str:
+    counts: dict[str, int] = {}
+    for c in clusters:
+        counts[_label(c)] = counts.get(_label(c), 0) + 1
+    top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+    parts = [(f"{n}× " if n > 1 else "") + short(label, 60) for label, n in top]
+    more = len(counts) - len(top)
+    return " · ".join(parts) + (f" · +{more} more" if more > 0 else "")
+
+
 def summary_markdown(
     report: ScanReport,
     selection: Selection | None = None,
     triage: dict[str, TriageResult] | None = None,
     fixes: dict[str, FixResult] | None = None,
     actions: list[dict] | None = None,
+    repository: str = "",
+    dry_run: bool = False,
 ) -> str:
-    triage, fixes = triage or {}, fixes or {}
-    out = [
-        "# secubot",
-        "",
-        f"{report.raw_results} raw results → {len(report.findings)} findings → "
-        f"{len(report.clusters)} clusters.",
-        "",
-        "| Tool | Status |",
-        "|---|---|",
-        *[f"| {inline(t, 40)} | {inline(s, 200)} |" for t, s in sorted(report.tool_status.items())],
-        "",
-        "| Cluster | Severity | Kind | Title | Decision |",
-        "|---|---|---|---|---|",
+    """The job summary: what secubot did, why, and what it left alone (grouped)."""
+    from secubot.state import SKIP_GROUPS
+
+    triage, fixes, actions = triage or {}, fixes or {}, actions or []
+    by_cluster: dict[str, list[dict]] = {}
+    for a in actions:
+        by_cluster.setdefault(str(a.get("cluster_id", "")), []).append(a)
+    clusters = {c.id: c for c in report.clusters}
+
+    out = [f"# secubot · {inline(repository, 100)}" if repository else "# secubot", ""]
+    if dry_run:
+        out += ["> **Dry run.** Nothing was pushed or opened; outcomes show what would happen.", ""]
+
+    counts = {"pull_request": 0, "issue": 0, "suppressed": 0, "deferred": 0, "error": 0}
+    for a in actions:
+        kind = "error" if a.get("type") == "retry" else a.get("type")
+        if kind in counts and a.get("cluster_id") != "-":
+            counts[kind] += 1
+    names = {
+        "pull_request": "draft PR",
+        "issue": "issue",
+        "suppressed": "suppressed",
+        "deferred": "deferred",
+        "error": "error",
+    }
+    plural = {"draft PR": "draft PRs", "issue": "issues", "error": "errors"}
+    headline = [
+        f"{n} {plural.get(names[k], names[k]) if n > 1 else names[k]}"
+        for k, n in counts.items()
+        if n
     ]
-    reasons = {d.cluster_id: d.reason for d in (selection.decisions if selection else [])}
-    for c in report.clusters[:100]:
-        decision = reasons.get(c.id, "")
-        if c.id in triage:
+    cost = sum(t.cost_usd for t in triage.values()) + sum(f.cost_usd for f in fixes.values())
+    tail = [f"{len(triage)} triaged"] if triage else ["nothing new to triage"]
+    if cost:
+        tail.append(f"cost ${cost:.2f}")
+    parts = [f"**{' · '.join(headline)}**"] if headline else []
+    out += [" · ".join([*parts, *tail]), ""]
+
+    tools = " · ".join(
+        f"{inline(name, 40)} {'✓' if status == 'ok' else '✗'}"
+        for name, status in sorted(report.tool_status.items())
+    )
+    out.append(
+        f"Scanned {report.raw_results} results → {len(report.clusters)} distinct findings"
+        + (f" · {tools}" if tools else "")
+    )
+    out += [
+        f"- **{inline(name, 40)} failed**: {short(status, 200)}"
+        for name, status in sorted(report.tool_status.items())
+        if status != "ok"
+    ]
+
+    handled = sorted(
+        (clusters[cid] for cid in triage if cid in clusters),
+        key=lambda c: (-c.severity.rank, c.id),
+    )
+    if handled:
+        out += [
+            "",
+            "## Handled this run",
+            "",
+            "| Finding | Severity | Verdict | Outcome |",
+            "|---|---|---|---|",
+        ]
+        for c in handled:
+            t, fix = triage[c.id], fixes.get(c.id)
+            out.append(
+                f"| {_finding_cell(c)} | {c.severity.value} | {_verdict(t)} | "
+                f"{_outcome(c, t, fix, by_cluster.get(c.id, []), dry_run)} |"
+            )
+        out += ["", "<details><summary>Triage reasoning</summary>", ""]
+        for c in handled:
             t = triage[c.id]
-            decision = f"triage: {t.action} ({inline(t.reason, 120)})"
-        if c.id in fixes:
-            decision += f"; fix: {fixes[c.id].status}"
-        out.append(
-            f"| `{c.id}` | {c.severity.value} | {c.kind.value} | {inline(c.title, 100)} | "
-            f"{inline(decision, 200) if c.id not in triage else decision} |"
-        )
+            if t.analysis:
+                why = short(t.analysis.reasoning, 450)
+            else:
+                why = short(t.error or t.reason, 300)
+            review = ""
+            if t.challenge:
+                review = (
+                    " Adversarial review: overturned."
+                    if t.challenge.challenge_holds
+                    else " Adversarial review: upheld."
+                )
+            out += [f"**{short(_label(c), 80)}** ({code(c.id)}): {why}{review}", ""]
+        out.append("</details>")
+
+    if selection:
+        skipped: dict[str, list[Cluster]] = {}
+        for d in selection.decisions:
+            if not d.selected and d.cluster_id in clusters:
+                skipped.setdefault(d.group or "other", []).append(clusters[d.cluster_id])
+        if skipped:
+            out += [
+                "",
+                "## Not handled this run",
+                "",
+                "| Why | Findings | Examples |",
+                "|---|--:|---|",
+            ]
+            order = [*SKIP_GROUPS, *sorted(set(skipped) - set(SKIP_GROUPS))]
+            for group in order:
+                if group not in skipped:
+                    continue
+                label = SKIP_GROUPS.get(group, "Other")
+                ex = "" if group in NO_EXAMPLES else _examples(skipped[group])
+                out.append(f"| {label} | {len(skipped[group])} | {ex} |")
+
     if selection and selection.expired_suppressions:
         out += [
             "",
@@ -326,10 +518,15 @@ def summary_markdown(
             f"{inline(x.reason, 200)}"
             for x in selection.expired_suppressions
         ]
-    if actions:
-        out += ["", "## Published", ""]
-        out += [
-            f"- {a['type']} for `{a['cluster_id']}`: {a.get('url') or a.get('detail', '')}"
-            for a in actions
-        ]
+
+    notes = []
+    for a in by_cluster.get("-", []):
+        if a.get("type") == "state":
+            notes.append(f"Suppressions on `secfix-state`: {short(a.get('detail'), 80)}.")
+        elif a.get("type") == "ignored":
+            notes.append(f"Publish ignored an artifact: {short(a.get('detail'), 150)}.")
+        else:
+            notes.append(f"{inline(a.get('type'), 30)}: {short(a.get('detail'), 150)}")
+    if notes:
+        out += ["", *[f"- {n}" for n in notes]]
     return "\n".join(out)

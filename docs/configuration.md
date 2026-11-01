@@ -66,8 +66,10 @@ configuration and the detected languages. There is an annotated full example at
 | Key | Default | |
 |---|---|---|
 | `skip` | `.git/`, `vendor/`, `node_modules/`, `third_party/`, `.venv/`, `venv/`, `**/testdata/` | gitignore-style patterns, relative to the repository root. Findings under them are dropped. Literal directory prefixes (`vendor/`) are also passed to the scanners as excludes. Negation (`!`) works, which is how a monorepo component is carved out |
+| `ignore_protected` | `false` | drop findings in protected paths (GitHub Actions workflows, agent and editor config) from secubot's report. secubot never edits those files, so they are report-only anyway. They are still scanned and still uploaded to Code Scanning, so the Security tab keeps them |
 
-Setting `skip` **replaces** the defaults, so repeat the defaults you want to keep.
+Setting `skip` **replaces** the defaults, so repeat the defaults you want to keep. To keep
+GitHub Actions findings out of Code Scanning as well, add `.github/` to `skip` instead.
 
 ### `commands`
 

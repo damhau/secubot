@@ -87,3 +87,17 @@ def test_iac_findings_cluster_per_file(report):
     assert len(iac) == len({c.path for c in iac})
     docker = next(c for c in iac if c.path == "Dockerfile")
     assert len(docker.findings) > 1 and "more" in docker.title
+
+
+def test_ignore_protected_drops_ci_findings(project, tmp_path, cfg):
+    import copy
+
+    files = prepare_sarif(project, tmp_path / "sarif")
+    base = normalise(files, project, cfg)
+    target = base.findings[0].path
+    noisy = copy.deepcopy(cfg)
+    noisy.fix.protected_paths = [target]  # stands in for .github/workflows/
+    assert any(f.path == target for f in normalise(files, project, noisy).findings)
+    quiet = copy.deepcopy(noisy)
+    quiet.paths.ignore_protected = True
+    assert all(f.path != target for f in normalise(files, project, quiet).findings)

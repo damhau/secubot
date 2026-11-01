@@ -73,6 +73,9 @@ class _Strict(BaseModel):
 class Paths(_Strict):
     skip: list[str] = Field(default_factory=lambda: list(DEFAULT_SKIP_PATHS))
     """gitignore-style patterns; findings under them are dropped and scanners skip them."""
+    ignore_protected: bool = False
+    """Drop findings in protected paths (GitHub Actions workflows, agent config) from secubot's
+    report. They are still scanned and still uploaded to Code Scanning."""
 
 
 class Commands(_Strict):

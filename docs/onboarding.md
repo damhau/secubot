@@ -85,9 +85,11 @@ narrows it further. For the first run, add this:
 
 Run it with **Actions → secfix → Run workflow** and check:
 
-1. The **scan summary**: scanner status, cluster table, why each cluster was or wasn't
-   selected. Add `paths.skip` and `suppressions` for noise.
-2. The **triage summary**: verdicts and the reasoning behind them.
+1. The **run summary** (on the run page): scanner status, then *Handled this run* with each
+   triaged finding's verdict and outcome (the reasoning is under *Triage reasoning*).
+2. *Not handled this run*: everything left alone, grouped by reason. Add `paths.skip` and
+   `suppressions` for noise, and `paths.ignore_protected: true` if the GitHub Actions
+   findings are just clutter for you.
 3. The **fix jobs**: whether build/test work in CI. Set `commands.setup` if dependencies
    must be fetched first (e.g. `go mod download`, `uv sync --frozen`).
 4. The **harden-runner** insights for each job: any endpoint the repository legitimately

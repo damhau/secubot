@@ -147,3 +147,11 @@ def test_clusters_only_in_protected_paths_are_report_only(report, cfg):
     sel = select(rep, RepoState(), cfg)
     decision = next(d for d in sel.decisions if d.cluster_id == target.id)
     assert not decision.selected and "protected path" in decision.reason
+    assert decision.group == "protected"
+
+
+def test_every_skip_has_a_group(report, cfg):
+    from secubot.state import SKIP_GROUPS, RepoState, select
+
+    sel = select(report, RepoState(), cfg)
+    assert all(d.group in SKIP_GROUPS for d in sel.decisions if not d.selected)

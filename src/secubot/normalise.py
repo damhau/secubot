@@ -232,6 +232,9 @@ def normalise(
     for path in sorted(sarif_files):
         raw.extend(parse_sarif(path, repo_root))
     kept = [f for f in raw if not skip.match_file(f.path)]
+    if cfg.paths.ignore_protected:
+        protected = cfg.protected_spec()
+        kept = [f for f in kept if not protected.match_file(f.path)]
     by_fp: dict[str, list[Finding]] = {}
     for f in kept:
         f.fingerprint = fingerprint(f)

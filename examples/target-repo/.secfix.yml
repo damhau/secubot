@@ -12,6 +12,7 @@ paths:
     - "**/testdata/"
     - "**/*_test.go" # example: ignore test-only code
     - docs/ # example
+  ignore_protected: false # true: leave GitHub Actions/agent-config findings to Code Scanning only
 
 commands: # run by secubot (scrubbed env) to verify a fix; the agent may run them verbatim
   setup: "" # example: "go mod download" or "uv sync --frozen"
