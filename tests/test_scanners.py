@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 
 import pytest
@@ -10,6 +11,7 @@ from secubot.normalise import normalise
 from secubot.scanners import (
     _fully_pinned,
     _skip_dirs,
+    _unreadable,
     enabled_tools,
     run_scanner,
     scrubbed_env,
@@ -92,3 +94,24 @@ def test_bandit_end_to_end(project, tmp_path):
     assert uris == {"pyapp/app.py"}
     report = normalise([tmp_path / "out" / "bandit.sarif"], project, cfg)
     assert any("CWE-78" in c.cwes for c in report.clusters)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can open anything")
+def test_unreadable_paths_are_found(tmp_path):
+    # Inside Claude Code's sandbox (`secubot recheck`), masked config files can't be opened
+    # and trivy aborts the whole scan on them (second rami run).
+    (tmp_path / "ok.py").write_text("x = 1\n")
+    (tmp_path / ".mcp.json").write_text("{}")
+    (tmp_path / ".mcp.json").chmod(0)
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude").chmod(0)
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "x.js").write_text("")
+    (tmp_path / "node_modules" / "x.js").chmod(0)
+    os.mkfifo(tmp_path / "pipe")  # must not block
+    try:
+        files, dirs = _unreadable(tmp_path, ["node_modules"])
+    finally:
+        (tmp_path / ".claude").chmod(0o755)
+    assert files == [".mcp.json"]
+    assert dirs == [".claude"]

@@ -88,6 +88,8 @@ class Inputs:
     fixes: dict[str, FixResult]
     patches: dict[str, str]
     ignored: list[str] = field(default_factory=list)
+    rejected: dict[str, str] = field(default_factory=dict)
+    """Clusters triaged as fix whose fix result was refused, and why."""
 
 
 CLUSTER_ID_RE = re.compile(r"[0-9a-f]{12}")
@@ -109,6 +111,7 @@ def load_inputs(scan_dir: Path, triage_dir: Path | None, fix_dir: Path | None) -
                 ignored.append(f"triage result for unknown cluster {t.cluster_id[:40]!r}")
     fixes: dict[str, FixResult] = {}
     patches: dict[str, str] = {}
+    rejected: dict[str, str] = {}
     if fix_dir and fix_dir.is_dir():
         for result_file in sorted(fix_dir.glob("**/result.json")):
             r = FixResult.model_validate_json(result_file.read_text())
@@ -117,14 +120,25 @@ def load_inputs(scan_dir: Path, triage_dir: Path | None, fix_dir: Path | None) -
             if not CLUSTER_ID_RE.fullmatch(cid) or t is None or t.action != "fix":
                 ignored.append(f"fix result for a cluster not triaged as fix: {cid[:40]!r}")
                 continue
-            if not result_file.parent.name.endswith(f"-fix-{cid}") or cid in fixes:
-                ignored.append(f"fix result {cid} in an unexpected or duplicate artifact")
+            if result_file.parent == fix_dir:
+                why = "not in its own artifact directory, so its fix job can't be identified"
+            elif not result_file.parent.name.endswith(f"-fix-{cid}"):
+                why = f"in artifact {result_file.parent.name[:60]!r}, not the one for {cid}"
+            elif cid in fixes:
+                why = "duplicate"
+            else:
+                why = ""
+            if why:
+                ignored.append(f"fix result {cid}: {why}")
+                rejected.setdefault(cid, why)
                 continue
             fixes[cid] = r
             patch = result_file.parent / "patch.diff"
             if patch.is_file():
                 patches[cid] = patch.read_text()
-    return Inputs(report, triage, fixes, patches, ignored)
+    for cid in fixes:
+        rejected.pop(cid, None)
+    return Inputs(report, triage, fixes, patches, ignored, rejected)
 
 
 @dataclass
@@ -404,8 +418,12 @@ class Publisher:
                     self.open_issue(cid, t.reason)
                 elif t.action == "error":
                     self._record("retry", cid, detail=f"triage error, retried next run: {t.error}")
+                elif t.action == "fix" and cid in inputs.rejected:
+                    detail = f"fix result rejected, retried next run: {inputs.rejected[cid]}"
+                    self._record("error", cid, detail=detail)
                 elif t.action == "fix" and cid not in inputs.fixes:
-                    self._record("deferred", cid, detail="no fix slot this run (policy.max_prs)")
+                    detail = "no fix result this run (over policy.max_prs, or the fix job failed)"
+                    self._record("deferred", cid, detail=detail)
             except (PublishError, KeyError) as exc:
                 self._record("error", cid, detail=str(exc)[:500])
         return self.actions

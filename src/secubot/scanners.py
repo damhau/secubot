@@ -107,6 +107,41 @@ def _skip_dirs(cfg: SecfixConfig) -> list[str]:
     return out
 
 
+def _unreadable(repo_root: Path, pruned: list[str]) -> tuple[list[str], list[str]]:
+    """Files and directories this process can't open, relative to the repository.
+
+    Claude Code's command sandbox masks config files (`.mcp.json`, `.claude/settings.json`,
+    shell rc files, ...) when the agent runs `secubot recheck`, and trivy aborts the whole
+    scan on the first one ("walk error ... permission denied"). Those paths are protected,
+    so secubot never acts on findings there anyway.
+    """
+    files: list[str] = []
+    dirs: list[str] = []
+    skip = {".git", *pruned}
+    for current, dirnames, filenames in os.walk(repo_root):
+        here = Path(current)
+        rel_dir = here.relative_to(repo_root)
+        keep = []
+        for name in dirnames:
+            rel = (rel_dir / name).as_posix()
+            if rel in skip:
+                continue
+            try:
+                with os.scandir(here / name):
+                    pass
+            except OSError:
+                dirs.append(rel)
+                continue
+            keep.append(name)
+        dirnames[:] = keep
+        for name in filenames:
+            try:
+                os.close(os.open(here / name, os.O_RDONLY | os.O_NONBLOCK))  # FIFOs: no wait
+            except OSError:
+                files.append((rel_dir / name).as_posix())
+    return files, dirs
+
+
 def _write(doc: dict, path: Path) -> None:
     path.write_text(json.dumps(doc, indent=1), encoding="utf-8")
 
@@ -137,7 +172,13 @@ def run_scanner(tool: str, repo_root: Path, out_dir: Path, cfg: SecfixConfig) ->
                 "--exit-code",
                 "0",
             ]
-            for d in _skip_dirs(cfg):
+            skip_dirs = _skip_dirs(cfg)
+            for d in skip_dirs:
+                cmd += ["--skip-dirs", d]
+            bad_files, bad_dirs = _unreadable(repo_root, skip_dirs)
+            for f in bad_files:
+                cmd += ["--skip-files", f]
+            for d in bad_dirs:
                 cmd += ["--skip-dirs", d]
             ok, detail = _run([*cmd, "."], repo_root)
             if not ok:

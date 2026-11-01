@@ -268,3 +268,26 @@ def test_load_inputs_ignores_untriaged_fix_artifacts(tmp_path, report):
     inputs = load_inputs(tmp_path / "scan", tmp_path / "triage", tmp_path / "fix")
     assert inputs.fixes == {} and inputs.patches == {}
     assert len(inputs.ignored) == 3
+    assert c.id in inputs.rejected
+
+
+def test_load_inputs_refuses_a_flat_fix_artifact(tmp_path, report):
+    """download-artifact unpacks a lone match straight into `path` (second rami run)."""
+    c = cluster_by(report, path="goapp/main.go", line=19)
+    (tmp_path / "scan").mkdir()
+    (tmp_path / "scan" / "report.json").write_text(report.model_dump_json())
+    (tmp_path / "triage").mkdir()
+    (tmp_path / "triage" / "triage.json").write_text(
+        json.dumps([_triage(c).model_dump(mode="json")])
+    )
+    (tmp_path / "fix").mkdir()
+    (tmp_path / "fix" / "result.json").write_text(_fixed(c).model_dump_json())
+    inputs = load_inputs(tmp_path / "scan", tmp_path / "triage", tmp_path / "fix")
+    assert inputs.fixes == {}
+    assert "own artifact directory" in inputs.rejected[c.id]
+    # with the artifact directory, the same result is accepted
+    artifact = tmp_path / "fix" / f"secubot-fix-{c.id}"
+    artifact.mkdir()
+    (tmp_path / "fix" / "result.json").rename(artifact / "result.json")
+    inputs = load_inputs(tmp_path / "scan", tmp_path / "triage", tmp_path / "fix")
+    assert c.id in inputs.fixes and inputs.rejected == {}

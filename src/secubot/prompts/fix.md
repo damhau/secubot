@@ -30,7 +30,8 @@ mitigate in code (stop calling the vulnerable function, validate its input) and 
 ### Tools and verification
 
 You can read and search the repository and edit files. You may run only these shell
-commands, verbatim (or with arguments where a `:*` suffix is shown):
+commands, verbatim (or with arguments where a `:*` suffix is shown), one per Bash call:
+no `;`, `&&`, pipes or redirections, which are refused:
 
 {commands}
 
