@@ -131,6 +131,9 @@ class Policy(_Strict):
     suppression_ttl_days: int = Field(default=30, ge=1, le=365)
     cooldown_days: int = Field(default=90, ge=0, le=730)
     """After a secubot PR is closed unmerged (or its issue is closed), wait this long."""
+    dismissed_ttl_days: int = Field(default=180, ge=1, le=730)
+    """Closing a secubot issue as *not planned* (false positive, accepted risk) suppresses the
+    finding this long, counted from the close date. Then it is examined again."""
 
 
 class FixConfig(_Strict):

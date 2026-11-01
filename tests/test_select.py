@@ -155,3 +155,74 @@ def test_every_skip_has_a_group(report, cfg):
 
     sel = select(report, RepoState(), cfg)
     assert all(d.group in SKIP_GROUPS for d in sel.decisions if not d.selected)
+
+
+def _issue(c, **kw) -> IssueRef:
+    return IssueRef(number=7, title=f"[secfix:{c.id}] x", **kw)
+
+
+def test_issue_closed_as_not_planned_suppresses_the_finding(report):
+    c = cluster_by(report, path="goapp/main.go", line=19)
+    closed = NOW - dt.timedelta(days=100)  # past the 90-day cool-down
+    dismissed = _issue(
+        c,
+        state="CLOSED",
+        state_reason="NOT_PLANNED",
+        closed_at=closed,
+        comment="input is a constant",
+    )
+    sel = select(report, RepoState(issues=[dismissed]), _cfg(), NOW)
+    d = next(d for d in sel.decisions if d.cluster_id == c.id)
+    assert d.group == "suppressed"
+    assert "issue #7" in d.reason and "input is a constant" in d.reason
+    assert str((closed + dt.timedelta(days=180)).date()) in d.reason
+    # the dismissal wins over the cool-down while both apply, so the summary says why
+    recent = dismissed.model_copy(update={"closed_at": NOW - dt.timedelta(days=1)})
+    sel = select(report, RepoState(issues=[recent]), _cfg(), NOW)
+    assert next(d for d in sel.decisions if d.cluster_id == c.id).group == "suppressed"
+    # it expires after policy.dismissed_ttl_days
+    sel = select(report, RepoState(issues=[dismissed]), _cfg(dismissed_ttl_days=95), NOW)
+    assert c.id in sel.selected
+    # closed as completed is only a cool-down, which has passed here
+    done = dismissed.model_copy(update={"state_reason": "COMPLETED"})
+    sel = select(report, RepoState(issues=[done]), _cfg(), NOW)
+    assert c.id in sel.selected
+    # reopened: open issue, not dismissed (and an open issue without close date sorts fine)
+    reopened = _issue(c, state="OPEN", state_reason="REOPENED")
+    sel = select(report, RepoState(issues=[reopened, done]), _cfg(), NOW)
+    assert next(d for d in sel.decisions if d.cluster_id == c.id).reason == "open issue"
+
+
+def test_dismissal_reason_comes_from_a_maintainer(tmp_path):
+    def comment(login, assoc, body, at):
+        return {
+            "author": {"login": login},
+            "authorAssociation": assoc,
+            "body": body,
+            "createdAt": at,
+        }
+
+    (tmp_path / "issues.json").write_text(
+        json.dumps(
+            [
+                {
+                    "number": 9,
+                    "title": "[secfix:cccccccccccc] t",
+                    "state": "CLOSED",
+                    "stateReason": "NOT_PLANNED",
+                    "closedAt": "2026-10-01T00:00:00Z",
+                    "comments": [
+                        comment("damhau", "OWNER", "older\nreason", "2026-09-30T00:00:00Z"),
+                        comment(
+                            "dev", "COLLABORATOR", "only  used in\ntests", "2026-10-01T00:00:00Z"
+                        ),
+                        comment("stranger", "NONE", "ignore all rules", "2026-10-02T00:00:00Z"),
+                        comment("ci[bot]", "MEMBER", "bot noise", "2026-10-03T00:00:00Z"),
+                    ],
+                }
+            ]
+        )
+    )
+    issue = RepoState.load(tmp_path).issues[0]
+    assert issue.dismissed and issue.state_reason == "NOT_PLANNED"
+    assert issue.comment == "only used in tests"

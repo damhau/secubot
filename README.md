@@ -113,7 +113,8 @@ about $1. Add `paths.skip` or `suppressions` to `.secfix.yml` for noise and run 
 **6. Go live**: delete the `dry-run: true` line, push, and run it again. You get draft PRs
 labelled `security` on `secfix/<id>` branches, `[secfix:<id>]` issues for what needs a
 human, and a `secfix-state` branch holding the suppressions. Nothing is ever merged
-automatically.
+automatically. If an issue is a false positive, close it as **Not planned** with a comment
+saying why: secubot leaves the finding alone for 180 days.
 
 **7. Run it daily**:
 

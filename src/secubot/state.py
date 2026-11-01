@@ -40,8 +40,16 @@ class IssueRef(BaseModel):
     number: int
     title: str
     state: str  # OPEN | CLOSED
+    state_reason: str = ""  # COMPLETED | NOT_PLANNED | DUPLICATE | REOPENED
     closed_at: dt.datetime | None = None
     url: str = ""
+    comment: str = ""
+    """Latest comment by the owner, an org member or a collaborator: why it was dismissed."""
+
+    @property
+    def dismissed(self) -> bool:
+        """Closed as *not planned*: a maintainer says it's a false positive or accepted risk."""
+        return self.state == "CLOSED" and self.state_reason == "NOT_PLANNED"
 
     @property
     def cluster_id(self) -> str | None:
@@ -84,8 +92,10 @@ class RepoState(BaseModel):
                 number=i["number"],
                 title=i.get("title", ""),
                 state=str(i.get("state", "")).upper(),
+                state_reason=str(i.get("stateReason") or "").upper(),
                 closed_at=i.get("closedAt") or None,
                 url=i.get("url", ""),
+                comment=_maintainer_comment(i.get("comments") or []),
             )
             for i in read_json("issues.json")
         ]
@@ -95,6 +105,24 @@ class RepoState(BaseModel):
             issues=issues,
             suppressions=load_state_suppressions(state_dir / STATE_FILE),
         )
+
+
+# Anyone can comment on a public repository; only these may give a dismissal its reason.
+MAINTAINER_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
+
+
+def _maintainer_comment(comments: list[dict]) -> str:
+    human = [
+        c
+        for c in comments
+        if isinstance(c, dict)
+        and c.get("authorAssociation") in MAINTAINER_ASSOCIATIONS
+        and not str((c.get("author") or {}).get("login", "")).endswith("[bot]")
+    ]
+    if not human:
+        return ""
+    latest = max(human, key=lambda c: str(c.get("createdAt", "")))
+    return " ".join(str(latest.get("body", "")).split())[:300]
 
 
 def load_state_suppressions(path: Path) -> list[Suppression]:
@@ -155,7 +183,7 @@ SKIP_GROUPS = {
     "cap": "Over the per-run limit (`policy.max_triage`), next run",
     "in_flight": "Already in progress (secfix branch, open PR or issue)",
     "cooldown": "Closed recently, cooling down (`policy.cooldown_days`)",
-    "suppressed": "Suppressed",
+    "suppressed": "Suppressed (`.secfix.yml`, `secfix-state`, or issue closed as not planned)",
     "dependency": "Dependencies not taken (`policy.dependencies`, or no fixed version)",
     "protected": "CI/agent config (GitHub Actions…): report only, see Code Scanning. "
     "Hide with `paths.ignore_protected`",
@@ -175,6 +203,26 @@ class Selection(BaseModel):
             if d.cluster_id == cluster_id:
                 return d.reason
         return ""
+
+
+def _dismissal(issues: list[IssueRef], ttl_days: int, today: dt.date) -> str | None:
+    """Skip reason if a maintainer closed this cluster's issue as *not planned* recently.
+
+    Only the latest dismissal counts; reopening the issue lifts it.
+    """
+    dismissed = [i for i in issues if i.dismissed and i.closed_at is not None]
+    if not dismissed:
+        return None
+    latest = max(dismissed, key=lambda i: _utc(i.closed_at))
+    until = _utc(latest.closed_at).date() + dt.timedelta(days=ttl_days)
+    if until < today:
+        return None  # expired: examine it again
+    why = f": {latest.comment}" if latest.comment else ""
+    return f"dismissed in issue #{latest.number} (closed as not planned) until {until}{why}"
+
+
+def _utc(when: dt.datetime) -> dt.datetime:
+    return when if when.tzinfo else when.replace(tzinfo=dt.UTC)
 
 
 def _recent(when: dt.datetime | None, days: int, now: dt.datetime) -> bool:
@@ -246,6 +294,9 @@ def select(
         elif hit := next((s for s in active if suppression_matches(s, c)), None):
             group = "suppressed"
             reason = f"suppressed until {hit.expires} ({hit.source}): {hit.reason}"
+        elif dismissal := _dismissal(issues_by_id.get(c.id, []), policy.dismissed_ttl_days, today):
+            group = "suppressed"
+            reason = dismissal
         elif c.branch in state.branches:
             group = "in_flight"
             reason = f"branch {c.branch} already exists (in flight)"

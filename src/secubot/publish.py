@@ -308,6 +308,7 @@ class Publisher:
                     self.server,
                     self.repo,
                     self.run_id,
+                    dismissed_ttl_days=self.cfg.policy.dismissed_ttl_days,
                 )
             )
             body_file = fh.name

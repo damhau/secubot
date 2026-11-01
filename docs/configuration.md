@@ -119,6 +119,7 @@ Go scanners run only when Go is detected, Python scanners only when Python is.
 | `auto_suppress_max_severity` | `high` | above this, an agreed false positive becomes an issue for a human to confirm |
 | `suppression_ttl_days` | `30` | lifetime of automatic suppressions |
 | `cooldown_days` | `90` | after a secubot PR is closed unmerged, or its issue is closed, leave the cluster alone this long |
+| `dismissed_ttl_days` | `180` | closing a secubot issue as **Not planned** (false positive, accepted risk) suppresses the finding this long, counted from the close date. The latest comment by a maintainer is recorded as the reason. Reopen the issue to undo it |
 
 ### `fix`
 
@@ -149,7 +150,9 @@ For dependency clusters, the agent can also run `go get:*` and `go mod tidy` (Go
 ### `suppressions`
 
 These are human-reviewed exceptions. Each one needs at least one selector, a reason of at
-least 10 characters, and an expiry date.
+least 10 characters, and an expiry date. For a single finding that secubot raised as an
+issue, closing the issue as **Not planned** is quicker (`policy.dismissed_ttl_days`); use
+this list for exceptions that cover a rule or a directory, or that should go through review.
 
 ```yaml
 suppressions:

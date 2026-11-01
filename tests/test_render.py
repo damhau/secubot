@@ -61,6 +61,7 @@ def test_issue_and_titles(report):
     assert render.pr_title(c).startswith("security: ")
     body = render.issue_body(c, "analysis and adversarial review disagree", _triage(c))
     assert "needs a human" in body and "## What to do" in body
+    assert "**Not planned**" in body and "180 days" in body
 
 
 def test_summary(report):

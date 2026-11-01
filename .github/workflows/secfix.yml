@@ -156,7 +156,7 @@ jobs:
             --json number,headRefName,state,closedAt,mergedAt,url \
             --jq '[.[] | select(.headRefName | startswith("secfix/"))]' > state/pulls.json
           gh issue list --repo "$REPO" --state all --limit 500 --search "secfix in:title" \
-            --json number,title,state,closedAt,url > state/issues.json
+            --json number,title,state,stateReason,closedAt,url,comments > state/issues.json
           gh api "repos/$REPO/contents/suppressions.yml?ref=secfix-state" \
             -H "Accept: application/vnd.github.raw" > state/suppressions.yml 2>/dev/null \
             || rm -f state/suppressions.yml

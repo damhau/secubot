@@ -93,6 +93,8 @@ This stage is plain code with no model involved (`sarif.py`, `normalise.py`).
    - its kind is not in `policy.kinds`
    - its severity is below `policy.min_severity`
    - it is covered by an active suppression
+   - its issue was closed as *not planned* within `dismissed_ttl_days` (a dismissal, see
+     below)
    - branch `secfix/<id>` exists (**the idempotency key**)
    - it has an open PR
    - it has a PR closed unmerged within `cooldown_days`
@@ -107,11 +109,21 @@ State is fetched read-only by the scan job:
 
 - remote `secfix/*` branches
 - PRs whose head is `secfix/*`
-- issues titled `[secfix:…]`
+- issues titled `[secfix:…]`, with why they were closed (`stateReason`) and their comments
 - `suppressions.yml` on the orphan branch `secfix-state`
 
 Nothing has to be stored anywhere else. Deleting the `secfix-state` branch resets the
 automatic suppressions.
+
+**Dismissals.** Closing a secubot issue as *Not planned* is how a human confirms a false
+positive or accepts a risk. Select treats the cluster as suppressed for
+`policy.dismissed_ttl_days` (180) from the close date, then examines it again. Only users
+with triage access or more can close the issue, and GitHub records who did, so this is
+safe on public repositories. The reason shown in the summary is the latest comment on the
+issue by its owner, an organisation member or a collaborator. Comments by anyone else and
+by bots are ignored. Nothing is written to `secfix-state`: the issue is the record, and
+reopening it lifts the dismissal. A dismissal applies before the cool-down, so the summary
+says *dismissed in issue #N* rather than *cool-down*.
 
 ## 3. Triage
 

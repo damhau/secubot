@@ -257,6 +257,7 @@ def issue_body(
     server: str = "",
     repo: str = "",
     run_id: str = "",
+    dismissed_ttl_days: int = 180,
 ) -> str:
     cost = (fix.cost_usd if fix else 0.0) + (triage.cost_usd if triage else 0.0)
     denied = (fix.denied_tool_calls if fix else 0) + (triage.denied_tool_calls if triage else 0)
@@ -271,10 +272,14 @@ def issue_body(
             parts.append(verification_section(fix))
     parts.append(
         "## What to do\n\n"
-        "- Real issue: fix it (or let secubot retry by closing this issue after the cool-down).\n"
-        "- False positive: add a suppression to `.secfix.yml` with a reason and an expiry, "
-        "then close this issue.\n"
-        "- Hard-coded secret: rotate it first, then remove it from the code and history."
+        "- **False positive or accepted risk:** close this issue as **Not planned**, with a "
+        f"comment saying why. secubot then leaves the finding alone for {dismissed_ttl_days} "
+        "days (`policy.dismissed_ttl_days`) and examines it again after that.\n"
+        "- **Real issue:** fix it and close this issue as completed. If the finding is still "
+        "reported after the cool-down, secubot tries again.\n"
+        "- **Hard-coded secret:** rotate it first, then remove it from the code and history.\n"
+        "- **Permanent exception** (a whole directory, a rule): add a suppression to "
+        "`.secfix.yml`, which goes through review like any change."
     )
     parts.append(footer(cluster, cost, model, denied))
     return "\n\n".join(parts)[:65000]

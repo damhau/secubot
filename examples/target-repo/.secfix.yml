@@ -46,6 +46,7 @@ policy:
   auto_suppress_max_severity: high # agreed FPs above this become issues instead
   suppression_ttl_days: 30
   cooldown_days: 90 # after a PR is closed unmerged / an issue is closed
+  dismissed_ttl_days: 180 # issue closed as "not planned" = false positive, suppressed this long
 
 fix:
   max_attempts: 3
