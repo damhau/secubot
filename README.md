@@ -33,33 +33,98 @@ Simple dependency bumps are left to Renovate/Dependabot by default. secubot only
 upgrades that break something (a major or 0.x minor bump), or vulnerable code that is
 reachable and has no fixed version.
 
-## Quick start
+## Enable secubot on a repository
 
-1. Add the `ANTHROPIC_API_KEY` secret to the target repository.
-2. Under **Settings → Actions → General**, enable *Allow GitHub Actions to create and approve
-   pull requests*. You can skip this if you use a GitHub App (see [onboarding](docs/onboarding.md)).
-3. Add `.github/workflows/secfix.yml`:
+You need `gh` logged in with admin access to the repository, and an Anthropic API key,
+ideally from a dedicated workspace with a monthly spend limit. Replace `OWNER/REPO` below.
+In a fork of secubot, also replace `damhau/secubot` with yours.
+
+**1. Add the API key as a secret** (`gh` prompts for it, so it never lands in your history):
+
+```bash
+gh secret set ANTHROPIC_API_KEY -R OWNER/REPO
+```
+
+**2. Allow GitHub Actions to open pull requests** (not needed with a GitHub App, see
+[onboarding](docs/onboarding.md#3-github-app-for-publish-recommended)):
+
+```bash
+gh api -X PUT repos/OWNER/REPO/actions/permissions/workflow \
+  -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true
+```
+
+**3. Add the caller workflow** as `.github/workflows/secfix.yml`:
 
 ```yaml
 name: secfix
 on:
-  schedule: [{ cron: "23 3 * * *" }]
   workflow_dispatch:
+  # schedule: [{ cron: "23 3 * * *" }] # step 7; pick a different time per repository
 permissions: {}
 concurrency: { group: secfix, cancel-in-progress: false }
 jobs:
   secfix:
-    uses: YOUR_ORG/secubot/.github/workflows/secfix.yml@v1
+    uses: damhau/secubot/.github/workflows/secfix.yml@main
     permissions: { contents: write, pull-requests: write, issues: write, security-events: write, actions: read }
+    with:
+      secubot-repository: damhau/secubot
+      secubot-ref: main # pin a release tag or SHA in step 7
+      dry-run: true # removed in step 6
+      egress-policy: audit # removed in step 7
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-4. Optional: add a `.secfix.yml` with build/test commands
-   ([annotated example](examples/target-repo/.secfix.yml)). Without them a fix is verified
-   only by a rescan.
-5. Run the workflow once by hand with `dry-run: true` and `egress-policy: audit` (pass them
-   through `with:`). Check the job summaries. Then remove both.
+On a private repository without GitHub Code Security, add `code-scanning: false` under `with:`.
+
+**4. Add `.secfix.yml`** at the repository root, so fixes are verified by your tests and not
+only by a rescan ([all options](docs/configuration.md), [annotated
+example](examples/target-repo/.secfix.yml)):
+
+```yaml
+version: 1
+commands:
+  setup: uv sync --frozen # Go: go mod download
+  test: uv run pytest -q # Go: go test ./...
+paths:
+  ignore_protected: true # optional: leave GitHub Actions findings to Code Scanning
+policy:
+  max_prs: 1 # optional: a slow start
+```
+
+Routine dependency bumps are left to Dependabot or Renovate, so enable one of them
+(`policy.dependencies: all` makes secubot take them instead). Commit and push both files.
+
+**5. Do a dry run** and watch it:
+
+```bash
+gh workflow run secfix.yml -R OWNER/REPO && sleep 5 && gh run watch -R OWNER/REPO
+```
+
+Nothing is pushed or opened. On the run page, the summary shows:
+
+- *Handled this run*: each finding triaged, its verdict and what would happen (draft PR,
+  issue, suppression). The reasoning is under *Triage reasoning*.
+- *Not handled this run*: everything left alone, grouped by reason.
+
+The patches are in the `secubot-fix-<id>` artifacts. A dry run of a small repository costs
+about $1. Add `paths.skip` or `suppressions` to `.secfix.yml` for noise and run again.
+
+**6. Go live**: delete the `dry-run: true` line, push, and run it again. You get draft PRs
+labelled `security` on `secfix/<id>` branches, `[secfix:<id>]` issues for what needs a
+human, and a `secfix-state` branch holding the suppressions. Nothing is ever merged
+automatically.
+
+**7. Run it daily**:
+
+1. Uncomment `schedule:`.
+2. After a few runs, look at the harden-runner section of each job log for the outbound
+   connections, then delete `egress-policy: audit` so the default `block` applies.
+3. Pin `@main` and `secubot-ref` to a release tag or SHA, so a secubot change reaches the
+   repository only through a reviewed PR.
+
+**To turn it off**, delete `.github/workflows/secfix.yml`. The `secfix/*` branches and
+`secfix-state` can be deleted at any time.
 
 ## Documentation
 
