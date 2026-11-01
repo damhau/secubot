@@ -14,3 +14,16 @@ build/
 /publish/
 /report/
 /dashboard/
+# local tooling and sandbox placeholders (root only: test fixtures may contain these names)
+/.claude/
+/.mcp.json
+/.idea/
+/.vscode/
+/.gitconfig
+/.gitmodules
+/.ripgreprc
+/.bashrc
+/.bash_profile
+/.profile
+/.zshrc
+/.zprofile
