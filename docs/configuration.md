@@ -119,6 +119,7 @@ Go scanners run only when Go is detected, Python scanners only when Python is.
 | `auto_suppress_max_severity` | `high` | above this, an agreed false positive becomes an issue for a human to confirm |
 | `suppression_ttl_days` | `30` | lifetime of automatic suppressions |
 | `cooldown_days` | `90` | after a secubot PR is closed unmerged, or its issue is closed, leave the cluster alone this long |
+| `auto_close` | `true` | close secubot's open issues and PRs whose finding a run no longer reports (fixed by a Dependabot PR or by hand, or now excluded), with a comment. Only when every scanner succeeded. A PR's `secfix/<id>` branch is deleted too. Issues for hard-coded secrets are never closed automatically |
 | `dismissed_ttl_days` | `180` | closing a secubot issue as **Not planned** (false positive, accepted risk) suppresses the finding this long, counted from the close date. The latest comment by a maintainer is recorded as the reason. Reopen the issue to undo it |
 
 ### `fix`

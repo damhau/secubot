@@ -137,6 +137,17 @@ Expired suppressions are listed in the run summary and dropped on the next state
 For stricter control, protect `secfix-state` with a ruleset that only the Actions bot or
 the App may bypass.
 
+A third path is a maintainer closing a secubot issue as *Not planned* (a dismissal,
+`policy.dismissed_ttl_days`). Only users with triage access or more can close issues, and
+GitHub records who did. The reason is read only from comments by the owner, organisation
+members and collaborators.
+
+**Auto-close** (`policy.auto_close`) closes secubot's own issues and PRs when a finding is
+no longer reported. That also happens when a finding is excluded by `.secfix.yml`, which
+is a reviewed change. It never runs when a scanner failed, it checks each item again in
+publish (still open, same cluster, same instance), and it never closes an issue for a
+hard-coded secret, because removing a secret from the code doesn't revoke it.
+
 ## Residual risks
 
 These are known gaps that are accepted or only partly mitigated. Review them before

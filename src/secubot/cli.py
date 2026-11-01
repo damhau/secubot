@@ -137,8 +137,14 @@ def cmd_select(args) -> int:
         print(f"{n:5d} skipped: {reason}", file=sys.stderr)
     if args.github_output:
         _gh_output(
-            count=str(len(selection.selected)), has_work=str(bool(selection.selected)).lower()
+            count=str(len(selection.selected)),
+            has_work=str(bool(selection.selected)).lower(),
+            has_resolved=str(bool(selection.resolved)).lower(),
         )
+    if selection.resolved:
+        print(f"{len(selection.resolved):5d} open issue/PR no longer reported", file=sys.stderr)
+    if selection.resolved_note:
+        print(f"auto-close held back: {selection.resolved_note}", file=sys.stderr)
     return 0
 
 
@@ -255,6 +261,7 @@ def cmd_publish(args) -> int:
         cfg=cfg,
         inputs=inputs,
         base_branch=args.base_branch or os.environ.get("GITHUB_REF_NAME", "main"),
+        instance=args.instance,
         server=os.environ.get("GITHUB_SERVER_URL", "https://github.com"),
         repo=os.environ.get("GITHUB_REPOSITORY", ""),
         run_id=os.environ.get("GITHUB_RUN_ID", ""),
@@ -432,6 +439,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--fix-dir", default=None)
     sp.add_argument("--out", required=True)
     sp.add_argument("--base-branch", default=None)
+    sp.add_argument(
+        "--instance", default="", help="workflow `instance` input; scopes auto-close in a monorepo"
+    )
     sp.add_argument("--dry-run", action="store_true")
 
     sp = add("summary", cmd_summary, "job summary markdown (+ fleet entry JSON)", repo=False)

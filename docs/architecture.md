@@ -105,6 +105,11 @@ This stage is plain code with no model involved (`sarif.py`, `normalise.py`).
    The remaining clusters are ranked by severity, then reachability, then kind
    (code first), and the first `policy.max_triage` are kept.
 
+   Select also lists the open secubot issues and PRs whose cluster is no longer in the
+   report, as candidates for auto-close (`policy.auto_close`). If any scanner failed, it
+   lists none, because a scanner that crashed reports nothing, which looks the same as a
+   fix. When there are candidates, publish runs even on a day with nothing to triage.
+
 State is fetched read-only by the scan job:
 
 - remote `secfix/*` branches
@@ -236,6 +241,18 @@ Publish is the only job with write access. It runs no model and no repository co
    `[secfix:<id>]` title tag.
 6. Commit new suppressions to `secfix-state` with git plumbing. Expired entries are
    dropped, and nothing is written when nothing changed.
+7. Auto-close. Each candidate from select is checked again before anything is closed:
+   - it must still be open
+   - the hidden marker in its body (`<!-- secubot:cluster=… instance=… kind=… -->`) must
+     name the same cluster and this run's `instance`. Bodies written before the marker
+     carried an instance count as the default instance, so in a monorepo one component's
+     run never closes another component's items
+   - it must not be a hard-coded secret: removing a secret from the code doesn't revoke it,
+     so a human closes those
+
+   Issues are closed as *completed* and PRs are closed with their `secfix/<id>` branch
+   deleted, each with a comment naming the commit that no longer has the finding. If the
+   same finding comes back, the usual cool-down applies.
 
 Publish runs serially for a repository (`concurrency: secfix-publish-<repo>`). PRs are
 always drafts and are never merged automatically. The ordinary review and CI of the

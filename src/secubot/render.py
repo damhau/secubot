@@ -209,7 +209,27 @@ def changes_section(r: FixResult) -> str:
     return "\n".join(out)
 
 
-def footer(cluster: Cluster, cost: float, model: str, denied: int) -> str:
+_INSTANCE_SAFE = re.compile(r"[^A-Za-z0-9_.-]")
+BODY_MARKER_RE = re.compile(r"<!-- secubot:cluster=([0-9a-f]{12})((?: [a-z]+=[^ >]*)*) -->")
+
+
+def body_marker(body: str) -> dict[str, str] | None:
+    """The hidden marker in a secubot issue or PR body: cluster, instance, kind.
+
+    Bodies from before the marker carried an instance read as the default instance ("")."""
+    m = BODY_MARKER_RE.search(body or "")
+    if not m:
+        return None
+    fields = dict(kv.split("=", 1) for kv in m.group(2).split())
+    return {
+        "cluster": m.group(1),
+        "instance": fields.get("instance", ""),
+        "kind": fields.get("kind", ""),
+    }
+
+
+def footer(cluster: Cluster, cost: float, model: str, denied: int, instance: str = "") -> str:
+    instance = _INSTANCE_SAFE.sub("", instance)[:40]
     return "\n".join(
         [
             "---",
@@ -220,7 +240,8 @@ def footer(cluster: Cluster, cost: float, model: str, denied: int) -> str:
             "(cool-down applies) or add a suppression with a reason and an expiry in "
             "`.secfix.yml`.</sub>",
             "",
-            f"<!-- secubot:cluster={cluster.id} fingerprints={','.join(cluster.fingerprints)} -->",
+            f"<!-- secubot:cluster={cluster.id} instance={instance} kind={cluster.kind.value} "
+            f"fingerprints={','.join(cluster.fingerprints)} -->",
         ]
     )
 
@@ -233,6 +254,7 @@ def pr_body(
     server: str = "",
     repo: str = "",
     run_id: str = "",
+    instance: str = "",
 ) -> str:
     cost = fix.cost_usd + (triage.cost_usd if triage else 0.0)
     denied = fix.denied_tool_calls + (triage.denied_tool_calls if triage else 0)
@@ -243,7 +265,7 @@ def pr_body(
         triage_section(triage),
         changes_section(fix),
         verification_section(fix),
-        footer(cluster, cost, model, denied),
+        footer(cluster, cost, model, denied, instance),
     ]
     return "\n\n".join(parts)[:65000]
 
@@ -258,6 +280,7 @@ def issue_body(
     repo: str = "",
     run_id: str = "",
     dismissed_ttl_days: int = 180,
+    instance: str = "",
 ) -> str:
     cost = (fix.cost_usd if fix else 0.0) + (triage.cost_usd if triage else 0.0)
     denied = (fix.denied_tool_calls if fix else 0) + (triage.denied_tool_calls if triage else 0)
@@ -281,7 +304,7 @@ def issue_body(
         "- **Permanent exception** (a whole directory, a rule): add a suppression to "
         "`.secfix.yml`, which goes through review like any change."
     )
-    parts.append(footer(cluster, cost, model, denied))
+    parts.append(footer(cluster, cost, model, denied, instance))
     return "\n\n".join(parts)[:65000]
 
 
@@ -393,6 +416,57 @@ def _examples(clusters: list[Cluster], limit: int = 3) -> str:
     return " · ".join(parts) + (f" · +{more} more" if more > 0 else "")
 
 
+def resolved_comment(
+    item: str, base_sha: str, base_branch: str, server: str = "", repo: str = "", run_id: str = ""
+) -> str:
+    where = (
+        f"`{inline(base_branch, 80)}` at `{base_sha[:12]}`" if base_sha else "the default branch"
+    )
+    run = f" ([run]({server}/{repo}/actions/runs/{run_id}))" if server and repo and run_id else ""
+    what = (
+        "this pull request and deleting its branch (restore it from this page if you still need it)"
+        if item == "pull_request"
+        else "this issue"
+    )
+    return (
+        f"secubot no longer finds this on {where}{run}, so it is closing {what}.\n\n"
+        "Either it was fixed (a merged Dependabot or Renovate PR, a manual change) or it is now "
+        "excluded (`paths.skip`, `paths.ignore_protected`, a scanner turned off). If the code "
+        "only changed shape, the finding is reported again under a new id. If this exact "
+        "finding comes back, secubot handles it again after `policy.cooldown_days`."
+    )
+
+
+def _resolved_section(actions: list[dict], selection: Selection | None, dry_run: bool) -> list[str]:
+    done = [a for a in actions if a.get("type") in {"closed", "kept_open"}]
+    note = selection.resolved_note if selection else ""
+    if not done and not note:
+        return []
+    out = ["", "## No longer reported", ""]
+    if done:
+        out += ["| Issue / PR | Outcome |", "|---|---|"]
+        for a in done:
+            noun = "PR" if a.get("item") == "pull_request" else "issue"
+            ref = f"{noun} #{int(a.get('number') or 0)}"
+            url = str(a.get("url") or "")
+            if url.startswith("https://"):
+                ref = f"[{ref}]({url})"
+            title = inline(ISSUE_TITLE_TAG.sub("", str(a.get("title") or "")), 90)
+            if a["type"] == "kept_open":
+                outcome = "left open: a secret finding, close it once the secret is rotated"
+            elif dry_run:
+                outcome = "would be closed (dry run)"
+            else:
+                outcome = "closed" + (", branch deleted" if a.get("item") == "pull_request" else "")
+            out.append(f"| {f'{ref} {title}'.strip()} | {outcome} |")
+    if note:
+        out += ["", f"- Auto-close held back: {short(note, 200)}."]
+    return out
+
+
+ISSUE_TITLE_TAG = re.compile(r"\[secfix:[0-9a-f]{12}\]\s*")
+
+
 def summary_markdown(
     report: ScanReport,
     selection: Selection | None = None,
@@ -415,7 +489,14 @@ def summary_markdown(
     if dry_run:
         out += ["> **Dry run.** Nothing was pushed or opened; outcomes show what would happen.", ""]
 
-    counts = {"pull_request": 0, "issue": 0, "suppressed": 0, "deferred": 0, "error": 0}
+    counts = {
+        "pull_request": 0,
+        "issue": 0,
+        "suppressed": 0,
+        "closed": 0,
+        "deferred": 0,
+        "error": 0,
+    }
     for a in actions:
         kind = "error" if a.get("type") == "retry" else a.get("type")
         if kind in counts and a.get("cluster_id") != "-":
@@ -424,6 +505,7 @@ def summary_markdown(
         "pull_request": "draft PR",
         "issue": "issue",
         "suppressed": "suppressed",
+        "closed": "closed (no longer reported)",
         "deferred": "deferred",
         "error": "error",
     }
@@ -509,6 +591,8 @@ def summary_markdown(
                 label = SKIP_GROUPS.get(group, "Other")
                 ex = "" if group in NO_EXAMPLES else _examples(skipped[group])
                 out.append(f"| {label} | {len(skipped[group])} | {ex} |")
+
+    out += _resolved_section(actions, selection, dry_run)
 
     if selection and selection.expired_suppressions:
         out += [

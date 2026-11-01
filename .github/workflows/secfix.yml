@@ -80,6 +80,7 @@ jobs:
       issues: read # state: secubot issues
     outputs:
       has_work: ${{ steps.select.outputs.has_work }}
+      has_resolved: ${{ steps.select.outputs.has_resolved }}
       tools: ${{ steps.detect.outputs.tools }}
       go: ${{ steps.detect.outputs.go }}
       sha: ${{ steps.meta.outputs.sha }}
@@ -153,7 +154,7 @@ jobs:
           gh api --paginate "repos/$REPO/git/matching-refs/heads/secfix/" --jq '.[].ref' \
             | jq -R . | jq -s . > state/branches.json
           gh pr list --repo "$REPO" --state all --limit 1000 \
-            --json number,headRefName,state,closedAt,mergedAt,url \
+            --json number,title,headRefName,state,closedAt,mergedAt,url \
             --jq '[.[] | select(.headRefName | startswith("secfix/"))]' > state/pulls.json
           gh issue list --repo "$REPO" --state all --limit 500 --search "secfix in:title" \
             --json number,title,state,stateReason,closedAt,url,comments > state/issues.json
@@ -408,9 +409,12 @@ jobs:
 
   publish:
     needs: [scan, triage, fix]
+    # Also runs on days with nothing to triage when an open secubot issue or PR is no
+    # longer reported (auto-close).
     if: >-
-      always() && needs.triage.result == 'success' &&
-      needs.triage.outputs.has_publish == 'true'
+      always() && needs.scan.result == 'success' && (
+        (needs.triage.result == 'success' && needs.triage.outputs.has_publish == 'true') ||
+        needs.scan.outputs.has_resolved == 'true')
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 30
     concurrency:
@@ -463,10 +467,12 @@ jobs:
           name: secubot${{ inputs.instance }}-scan
           path: scan
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.triage.result == 'success'
         with:
           name: secubot${{ inputs.instance }}-triage
           path: triage
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.triage.result == 'success'
         with:
           # Must match at least two artifacts: with a single match, download-artifact
           # extracts straight into `path`, the artifact name that ties a result to its fix
@@ -495,13 +501,15 @@ jobs:
           CONFIG: ${{ inputs.config-path }}
           BASE_BRANCH: ${{ needs.scan.outputs.ref_name }}
           DRY_RUN: ${{ inputs.dry-run }}
+          INSTANCE: ${{ inputs.instance }}
           SECUBOT_GIT_NAME: ${{ steps.ident.outputs.name }}
           SECUBOT_GIT_EMAIL: ${{ steps.ident.outputs.email }}
         run: |
           args=()
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
           secubot publish --repo target --config "$CONFIG" --scan-dir scan --triage-dir triage \
-            --fix-dir fix --out publish --base-branch "$BASE_BRANCH" "${args[@]}"
+            --fix-dir fix --out publish --base-branch "$BASE_BRANCH" --instance "$INSTANCE" \
+            "${args[@]}"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

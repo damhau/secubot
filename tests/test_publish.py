@@ -36,6 +36,7 @@ class FakeGhRunner(Runner):
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self.gh_calls: list[list[str]] = []
+        self.views: dict[tuple[str, int], dict] = {}
 
     def run(self, *cmd, input=None, check=True, mutating=False):
         if cmd[0] == "gh":
@@ -48,6 +49,11 @@ class FakeGhRunner(Runner):
                 out = "https://github.com/o/r/issues/8\n"
             elif cmd[1:3] == ("issue", "list"):
                 out = "[]"
+            elif cmd[2:3] == ("view",):
+                view = self.views.get((cmd[1], int(cmd[3])))
+                if view is None:
+                    return subprocess.CompletedProcess(list(cmd), 1, "", "not found")
+                out = json.dumps(view)
             return subprocess.CompletedProcess(list(cmd), 0, out, "")
         return super().run(*cmd, input=input, check=check, mutating=mutating)
 
@@ -291,3 +297,67 @@ def test_load_inputs_refuses_a_flat_fix_artifact(tmp_path, report):
     (tmp_path / "fix" / "result.json").rename(artifact / "result.json")
     inputs = load_inputs(tmp_path / "scan", tmp_path / "triage", tmp_path / "fix")
     assert c.id in inputs.fixes and inputs.rejected == {}
+
+
+def _marker(cid, instance="", kind="code"):
+    return f"body\n<!-- secubot:cluster={cid} instance={instance} kind={kind} fingerprints=x -->"
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_auto_close_checks_each_item_again(project, remote, report, dry_run):
+    from secubot.state import Resolved
+
+    pr, legacy, secret, other, gone = "b" * 12, "c" * 12, "a" * 12, "d" * 12, "e" * 12
+    git(project, "push", "-q", "origin", f"main:refs/heads/secfix/{pr}")
+    resolved = [
+        Resolved(cluster_id=pr, item="pull_request", number=41, title="security: x"),
+        Resolved(cluster_id=legacy, item="issue", number=42, title=f"[secfix:{legacy}] anyio"),
+        Resolved(cluster_id=secret, item="issue", number=43),
+        Resolved(cluster_id=other, item="issue", number=44),
+        Resolved(cluster_id=gone, item="issue", number=45),
+    ]
+    pub, runner = _publisher(project, report, {}, {}, {}, dry_run=dry_run)
+    pub.inputs.resolved = resolved
+    runner.views = {
+        ("pr", 41): {"state": "OPEN", "body": _marker(pr)},
+        ("issue", 42): {
+            "state": "OPEN",
+            "body": f"<!-- secubot:cluster={legacy} fingerprints=x -->",
+        },
+        ("issue", 43): {"state": "OPEN", "body": _marker(secret, kind="secret")},
+        ("issue", 44): {"state": "OPEN", "body": _marker(other, instance="-api")},
+        ("issue", 45): {"state": "CLOSED", "body": _marker(gone)},
+    }
+    actions = {a["cluster_id"]: a for a in pub.run(TODAY)}
+    assert actions[pr]["type"] == "closed" and actions[legacy]["type"] == "closed"
+    assert actions[secret]["type"] == "kept_open"
+    assert actions[other]["type"] == "skipped" and "-api" in actions[other]["detail"]
+    assert actions[gone]["type"] == "skipped" and "no longer open" in actions[gone]["detail"]
+    closes = [c for c in runner.gh_calls if c[2:3] == ["close"]]
+    assert [(c[1], c[3]) for c in closes] == [("pr", "41"), ("issue", "42")]
+    issue_close = closes[1]
+    assert issue_close[issue_close.index("--reason") + 1] == "completed"
+    assert "no longer finds this" in issue_close[issue_close.index("--comment") + 1]
+    heads = subprocess.run(
+        ["git", "-C", str(remote), "branch", "--list"], capture_output=True, text=True, check=True
+    ).stdout
+    assert (f"secfix/{pr}" in heads) == dry_run  # the PR's branch is deleted, unless dry run
+
+
+def test_load_inputs_drops_resolved_items_that_are_still_reported(tmp_path, report):
+    from secubot.state import Resolved, Selection
+
+    present = report.clusters[0].id
+    (tmp_path / "report.json").write_text(report.model_dump_json())
+    sel = Selection(
+        selected=[],
+        decisions=[],
+        resolved=[
+            Resolved(cluster_id=present, item="issue", number=1),
+            Resolved(cluster_id="not-an-id", item="issue", number=2),
+            Resolved(cluster_id="f" * 12, item="issue", number=3),
+        ],
+    )
+    (tmp_path / "selection.json").write_text(sel.model_dump_json())
+    inputs = load_inputs(tmp_path, None, None)
+    assert [r.number for r in inputs.resolved] == [3]

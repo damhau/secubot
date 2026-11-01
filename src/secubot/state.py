@@ -14,7 +14,7 @@ import datetime as dt
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pathspec
 import yaml
@@ -34,6 +34,7 @@ class PullRef(BaseModel):
     state: str  # OPEN | CLOSED | MERGED
     closed_at: dt.datetime | None = None
     url: str = ""
+    title: str = ""
 
 
 class IssueRef(BaseModel):
@@ -84,6 +85,7 @@ class RepoState(BaseModel):
                 state="MERGED" if p.get("mergedAt") else str(p.get("state", "")).upper(),
                 closed_at=p.get("closedAt") or None,
                 url=p.get("url", ""),
+                title=p.get("title", ""),
             )
             for p in read_json("pulls.json")
         ]
@@ -193,10 +195,24 @@ SKIP_GROUPS = {
 }
 
 
+class Resolved(BaseModel):
+    """An open secubot issue or PR whose finding this run no longer reports."""
+
+    cluster_id: str
+    item: Literal["issue", "pull_request"]
+    number: int
+    title: str = ""
+    url: str = ""
+
+
 class Selection(BaseModel):
     selected: list[str]
     decisions: list[Decision]
     expired_suppressions: list[Suppression] = Field(default_factory=list)
+    resolved: list[Resolved] = Field(default_factory=list)
+    """Candidates for auto-close; publish checks each one again before closing it."""
+    resolved_note: str = ""
+    """Why auto-close was held back this run, if it was."""
 
     def reason_for(self, cluster_id: str) -> str:
         for d in self.decisions:
@@ -348,9 +364,60 @@ def select(
                 group="cap",
             )
         )
+    resolved, resolved_note = find_resolved(report, state, policy.auto_close)
     return Selection(
-        selected=[c.id for c in selected], decisions=decisions, expired_suppressions=expired
+        selected=[c.id for c in selected],
+        decisions=decisions,
+        expired_suppressions=expired,
+        resolved=resolved,
+        resolved_note=resolved_note,
     )
+
+
+CLUSTER_ID_RE = re.compile(r"[0-9a-f]{12}")
+
+
+def find_resolved(
+    report: ScanReport, state: RepoState, enabled: bool
+) -> tuple[list[Resolved], str]:
+    """Open secubot issues and PRs whose cluster this scan no longer reports.
+
+    A scanner that failed reports nothing, which looks exactly like a fix, so nothing is
+    closed unless every scanner succeeded.
+    """
+    if not enabled:
+        return [], ""
+    known = {c.id for c in report.clusters}
+    found: list[Resolved] = []
+    for p in state.pulls:
+        cid = p.head.removeprefix(BRANCH_PREFIX)
+        if (
+            p.state == "OPEN"
+            and p.head.startswith(BRANCH_PREFIX)
+            and CLUSTER_ID_RE.fullmatch(cid)
+            and cid not in known
+        ):
+            found.append(
+                Resolved(
+                    cluster_id=cid, item="pull_request", number=p.number, title=p.title, url=p.url
+                )
+            )
+    for i in state.issues:
+        cid = i.cluster_id
+        if i.state == "OPEN" and cid and cid not in known:
+            found.append(
+                Resolved(cluster_id=cid, item="issue", number=i.number, title=i.title, url=i.url)
+            )
+    if not found:
+        return [], ""
+    failed = sorted(t for t, status in report.tool_status.items() if status != "ok")
+    if failed or not report.tool_status:
+        why = f"{', '.join(failed)} failed" if failed else "no scanner reported a status"
+        return [], (
+            f"{len(found)} open secubot issue(s) or PR(s) are no longer reported, but none "
+            f"were closed because {why} this run"
+        )
+    return found, ""
 
 
 def branch_names(clusters: list[Cluster]) -> list[str]:

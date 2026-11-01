@@ -157,11 +157,12 @@ as `@main` has nothing to bump.
   until the bump is merged.
 - **The same major upgrade can get two PRs.** secubot only checks its own `secfix/*`
   branches, not Dependabot's. secubot's PR is usually the one to keep, because it includes
-  the code changes and passed your tests. Closing a secubot PR starts the 90-day
-  cool-down.
-- **secubot doesn't close its own issues and PRs when a finding goes away.** If a merged
-  Dependabot PR (or a manual fix) resolves a finding that has an open secubot issue or
-  PR, close it by hand.
+  the code changes and passed your tests. If you merge Dependabot's instead, secubot closes
+  its own PR on the next run.
+- **secubot cleans up after Dependabot.** When a merged Dependabot PR (or a manual fix)
+  resolves a finding that has an open secubot issue or PR, the next run closes it with a
+  comment (`policy.auto_close`). Issues for hard-coded secrets are the exception: close
+  those yourself once the secret is rotated.
 - Suppressions don't cross over. A secubot suppression or dismissal doesn't dismiss the
   Dependabot alert, and a dismissed Dependabot alert doesn't suppress the finding in
   secubot. For dependencies this rarely matters, because the bump is the fix either way.
@@ -212,6 +213,9 @@ See [`examples/monorepo/`](../examples/monorepo/).
   can run in one workflow run.
 - Cluster ids include the path, so branches and issues of different components never
   collide.
+- Auto-close is scoped by instance. Every issue and PR body records the `instance` that
+  opened it, and a run only closes its own. Items opened before secubot recorded the
+  instance belong to the run without an `instance`.
 - Carve out a component with negated skip patterns
   ([`services-api.secfix.yml`](../examples/monorepo/services-api.secfix.yml)):
 

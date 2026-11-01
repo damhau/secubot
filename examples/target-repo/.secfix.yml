@@ -47,6 +47,7 @@ policy:
   suppression_ttl_days: 30
   cooldown_days: 90 # after a PR is closed unmerged / an issue is closed
   dismissed_ttl_days: 180 # issue closed as "not planned" = false positive, suppressed this long
+  auto_close: true # close secubot issues/PRs whose finding is no longer reported
 
 fix:
   max_attempts: 3

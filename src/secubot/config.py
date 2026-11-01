@@ -134,6 +134,9 @@ class Policy(_Strict):
     dismissed_ttl_days: int = Field(default=180, ge=1, le=730)
     """Closing a secubot issue as *not planned* (false positive, accepted risk) suppresses the
     finding this long, counted from the close date. Then it is examined again."""
+    auto_close: bool = True
+    """Close secubot's open issues and PRs whose finding a run no longer reports (fixed by
+    Dependabot or by hand, or now excluded). Only when every scanner succeeded."""
 
 
 class FixConfig(_Strict):

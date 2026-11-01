@@ -226,3 +226,38 @@ def test_dismissal_reason_comes_from_a_maintainer(tmp_path):
     issue = RepoState.load(tmp_path).issues[0]
     assert issue.dismissed and issue.state_reason == "NOT_PLANNED"
     assert issue.comment == "only used in tests"
+
+
+def test_find_resolved_lists_open_items_whose_finding_is_gone(report):
+    from secubot.state import find_resolved
+
+    present = cluster_by(report, path="goapp/main.go", line=19)
+    gone_pr, gone_issue, old = "b" * 12, "c" * 12, "d" * 12
+    state = RepoState(
+        pulls=[
+            PullRef(number=41, head=f"secfix/{gone_pr}", state="OPEN", title="security: x"),
+            PullRef(number=40, head=f"secfix/{present.id}", state="OPEN"),
+            PullRef(number=39, head="dependabot/uv/anyio", state="OPEN"),
+        ],
+        issues=[
+            IssueRef(number=42, title=f"[secfix:{gone_issue}] anyio", state="OPEN", url="u"),
+            IssueRef(number=38, title=f"[secfix:{old}] old", state="CLOSED"),
+            IssueRef(number=37, title=f"[secfix:{present.id}] still here", state="OPEN"),
+        ],
+    )
+    ok = report.model_copy(update={"tool_status": {"gosec": "ok", "trivy-fs": "ok"}})
+    found, note = find_resolved(ok, state, True)
+    assert {(r.item, r.number, r.cluster_id) for r in found} == {
+        ("pull_request", 41, gone_pr),
+        ("issue", 42, gone_issue),
+    }
+    assert note == ""
+    # the whole selection carries them, for the scan job's has_resolved output
+    assert len(select(ok, state, _cfg(), NOW).resolved) == 2
+    # a failed scanner reports nothing, which looks like a fix: close nothing
+    failed = ok.model_copy(update={"tool_status": {"gosec": "failed: exit 2", "trivy-fs": "ok"}})
+    found, note = find_resolved(failed, state, True)
+    assert found == [] and "gosec failed" in note
+    assert find_resolved(report.model_copy(update={"tool_status": {}}), state, True)[0] == []
+    assert find_resolved(ok, state, False) == ([], "")
+    assert select(ok, state, _cfg(auto_close=False), NOW).resolved == []

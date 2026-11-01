@@ -133,3 +133,41 @@ def test_summary_lists_expired_suppressions(report):
         report, Selection(selected=[], decisions=[], expired_suppressions=[old])
     )
     assert "## Expired suppressions" in md and "G404" in md
+
+
+def test_body_marker_roundtrip(report):
+    c = cluster_by(report, path="goapp/main.go", line=19)
+    body = render.issue_body(c, "needs a human", instance="-api")
+    assert render.body_marker(body) == {"cluster": c.id, "instance": "-api", "kind": "code"}
+    # bodies written before the marker carried an instance belong to the default instance
+    legacy = f"x\n<!-- secubot:cluster={c.id} fingerprints=ab,cd -->"
+    assert render.body_marker(legacy) == {"cluster": c.id, "instance": "", "kind": ""}
+    assert render.body_marker("no marker") is None
+    # a hostile instance value can't break out of the comment
+    assert "-->" not in render.footer(c, 0, "m", 0, "x --> <b>")[:-4].split("<!--")[1]
+
+
+def test_summary_lists_closed_items(report):
+    actions = [
+        {
+            "type": "closed",
+            "cluster_id": "c" * 12,
+            "item": "issue",
+            "number": 42,
+            "title": f"[secfix:{'c' * 12}] anyio 4.13.0 -> 4.14.2",
+            "url": "https://github.com/o/r/issues/42",
+        },
+        {"type": "closed", "cluster_id": "b" * 12, "item": "pull_request", "number": 41},
+        {"type": "kept_open", "cluster_id": "a" * 12, "item": "issue", "number": 7},
+    ]
+    md = render.summary_markdown(report, actions=actions)
+    assert "**2 closed (no longer reported)**" in md
+    assert "## No longer reported" in md
+    assert (
+        "| [issue #42](https://github.com/o/r/issues/42) anyio 4.13.0 -&gt; 4.14.2 | closed |" in md
+    )
+    assert "| PR #41 | closed, branch deleted |" in md
+    assert "secret finding" in md
+    assert "would be closed (dry run)" in render.summary_markdown(
+        report, actions=actions, dry_run=True
+    )

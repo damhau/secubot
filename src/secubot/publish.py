@@ -25,6 +25,8 @@ from secubot.state import (
     ISSUE_TITLE_RE,
     STATE_BRANCH,
     STATE_FILE,
+    Resolved,
+    Selection,
     dump_state_suppressions,
     parse_state_suppressions,
 )
@@ -90,6 +92,8 @@ class Inputs:
     ignored: list[str] = field(default_factory=list)
     rejected: dict[str, str] = field(default_factory=dict)
     """Clusters triaged as fix whose fix result was refused, and why."""
+    resolved: list[Resolved] = field(default_factory=list)
+    """Open secubot issues/PRs whose finding the scan no longer reports (auto-close)."""
 
 
 CLUSTER_ID_RE = re.compile(r"[0-9a-f]{12}")
@@ -138,7 +142,15 @@ def load_inputs(scan_dir: Path, triage_dir: Path | None, fix_dir: Path | None) -
                 patches[cid] = patch.read_text()
     for cid in fixes:
         rejected.pop(cid, None)
-    return Inputs(report, triage, fixes, patches, ignored, rejected)
+    resolved: list[Resolved] = []
+    if (scan_dir / "selection.json").is_file():
+        selection = Selection.model_validate_json((scan_dir / "selection.json").read_text())
+        resolved = [
+            r
+            for r in selection.resolved
+            if CLUSTER_ID_RE.fullmatch(r.cluster_id) and r.cluster_id not in known
+        ]
+    return Inputs(report, triage, fixes, patches, ignored, rejected, resolved)
 
 
 @dataclass
@@ -150,6 +162,7 @@ class Publisher:
     server: str = ""
     repo: str = ""
     run_id: str = ""
+    instance: str = ""
     git_name: str = "github-actions[bot]"
     git_email: str = "41898282+github-actions[bot]@users.noreply.github.com"
     actions: list[dict] = field(default_factory=list)
@@ -264,6 +277,7 @@ class Publisher:
                     self.server,
                     self.repo,
                     self.run_id,
+                    instance=self.instance,
                 )
             )
             body_file = fh.name
@@ -309,6 +323,7 @@ class Publisher:
                     self.repo,
                     self.run_id,
                     dismissed_ttl_days=self.cfg.policy.dismissed_ttl_days,
+                    instance=self.instance,
                 )
             )
             body_file = fh.name
@@ -327,6 +342,70 @@ class Publisher:
         finally:
             os.unlink(body_file)
         self._record("issue", cluster_id, url=proc.stdout.strip(), detail=reason[:300])
+
+    # -- auto-close -----------------------------------------------------------------------
+
+    def close_resolved(self) -> None:
+        for item in self.inputs.resolved:
+            try:
+                self._close_resolved(item)
+            except PublishError as exc:
+                detail = f"closing {item.item} #{item.number}: {exc}"[:500]
+                self._record("error", item.cluster_id, detail=detail)
+
+    def _close_resolved(self, item: Resolved) -> None:
+        """Close one issue/PR after checking it again: still open, ours, not a secret."""
+        noun = "pr" if item.item == "pull_request" else "issue"
+        ref = f"{item.item} #{item.number}"
+        proc = self.runner.gh(noun, "view", str(item.number), "--json", "state,body", check=False)
+        try:
+            live = json.loads(proc.stdout or "{}")
+        except json.JSONDecodeError:
+            live = {}
+        if proc.returncode != 0 or str(live.get("state", "")).upper() != "OPEN":
+            self._record("skipped", item.cluster_id, detail=f"{ref} is no longer open")
+            return
+        marker = render.body_marker(str(live.get("body") or "")) or {}
+        if marker and marker["cluster"] != item.cluster_id:
+            self._record("skipped", item.cluster_id, detail=f"{ref} body names another cluster")
+            return
+        if marker.get("instance", "") != self.instance:
+            owner = marker.get("instance") or "the default instance"
+            self._record("skipped", item.cluster_id, detail=f"{ref} belongs to {owner}")
+            return
+        info = {"item": item.item, "number": item.number, "title": item.title, "url": item.url}
+        if marker.get("kind") == "secret":
+            # Gone from the code is not the same as revoked: a human closes these.
+            self._record("kept_open", item.cluster_id, detail="secret finding", **info)
+            return
+        comment = render.resolved_comment(
+            item.item,
+            self.inputs.report.base_sha,
+            self.base_branch,
+            self.server,
+            self.repo,
+            self.run_id,
+        )
+        if item.item == "pull_request":
+            self.runner.gh("pr", "close", str(item.number), "--comment", comment, mutating=True)
+            branch = f"secfix/{item.cluster_id}"
+            deleted = self.runner.git(
+                "push", "origin", "--delete", f"refs/heads/{branch}", check=False, mutating=True
+            )
+            if deleted.returncode != 0:
+                info["detail_branch"] = f"{branch} not deleted: {deleted.stderr.strip()[-200:]}"
+        else:
+            self.runner.gh(
+                "issue",
+                "close",
+                str(item.number),
+                "--reason",
+                "completed",
+                "--comment",
+                comment,
+                mutating=True,
+            )
+        self._record("closed", item.cluster_id, detail="no longer reported", **info)
 
     # -- state branch ---------------------------------------------------------------------
 
@@ -427,4 +506,7 @@ class Publisher:
                     self._record("deferred", cid, detail=detail)
             except (PublishError, KeyError) as exc:
                 self._record("error", cid, detail=str(exc)[:500])
+
+        if cfg.policy.auto_close:
+            self.close_resolved()
         return self.actions

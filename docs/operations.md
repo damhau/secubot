@@ -123,8 +123,9 @@ Ways to cut cost:
 |---|---|
 | A secubot PR is wrong | Close it. The cluster rests for `cooldown_days` (90), then is triaged again. To stop it for good, add a suppression with a reason to `.secfix.yml` |
 | A secubot issue is a false positive or an accepted risk | Close it as **Not planned**, with a comment saying why. The finding is suppressed for `dismissed_ttl_days` (180) and the comment is its recorded reason. Reopen the issue to undo it |
-| Dependabot/Renovate and secubot opened PRs for the same upgrade | Possible for major upgrades only. Keep secubot's if it includes the code changes the upgrade needs, and close the other. Closing secubot's starts the cool-down |
-| A secubot issue or PR is still open, but the finding was fixed elsewhere (a merged Dependabot PR, a manual fix) | secubot doesn't close them yet. Close it by hand: completed for an issue, closed without merge for a PR |
+| Dependabot/Renovate and secubot opened PRs for the same upgrade | Possible for major upgrades only. Keep secubot's if it includes the code changes the upgrade needs, and close the other. If you merge the other one, secubot closes its own PR on the next run |
+| A finding was fixed elsewhere (a merged Dependabot PR, a manual fix) | Nothing to do: the next run closes the secubot issue or PR (`policy.auto_close`) and lists it under *No longer reported*. Exceptions: issues for hard-coded secrets stay open until you close them after rotating the secret, and nothing is closed on a run where a scanner failed |
+| Auto-close closed something it shouldn't have | The finding left the report: check for a `.secfix.yml` change (`paths.skip`, a scanner turned off) or a changed line that gave it a new id. Reopen the item if needed, and set `policy.auto_close: false` while you investigate |
 | A secubot PR is right but incomplete | Push to the `secfix/<id>` branch like any PR, then mark it ready for review |
 | An automatic suppression is wrong | Delete its entry from `suppressions.yml` on `secfix-state` (or delete the branch to reset all). Consider lowering `auto_suppress_max_severity` |
 | A finding should be retried now | Delete the `secfix/<id>` branch and close its PR or issue. A closed PR or issue still triggers the cooldown, so also set `policy.cooldown_days: 0` for one run |

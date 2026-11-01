@@ -125,7 +125,8 @@ about $1. Add `paths.skip` or `suppressions` to `.secfix.yml` for noise and run 
 labelled `security` on `secfix/<id>` branches, `[secfix:<id>]` issues for what needs a
 human, and a `secfix-state` branch holding the suppressions. Nothing is ever merged
 automatically. If an issue is a false positive, close it as **Not planned** with a comment
-saying why: secubot leaves the finding alone for 180 days.
+saying why: secubot leaves the finding alone for 180 days. When a finding goes away (a
+merged Dependabot PR, a manual fix), the next run closes its secubot issue or PR.
 
 **7. Run it daily**:
 
