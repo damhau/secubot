@@ -149,7 +149,7 @@ The deterministic stages need no API key:
 ```bash
 uv sync
 export PATH="$PWD/.tools/bin:$PATH"
-SECUBOT_TOOLS="$PWD/.tools" scripts/install-scanners.sh   # or use scanners already on PATH
+SECUBOT_TOOLS="$PWD/.tools" scripts/install-scanners.sh trivy-fs bandit pip-audit semgrep  # + gosec govulncheck (needs Go)
 uv run secubot config-check --repo ../my-service
 uv run secubot scan      --repo ../my-service --out out/scan/sarif
 uv run secubot normalise --repo ../my-service --sarif-dir out/scan/sarif --out out/scan/report.json

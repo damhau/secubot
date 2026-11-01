@@ -57,7 +57,7 @@ def test_pipeline_commands(project, tmp_path, monkeypatch, capsys):
     assert main(["summary", "--scan-dir", str(scan), "--out", str(tmp_path / "r.json")]) == 0
     assert "# secubot" in capsys.readouterr().out
     run_report = json.loads((tmp_path / "r.json").read_text())
-    assert run_report["totals"]["clusters"] == 16 and run_report["schema"] == 1
+    assert run_report["totals"]["clusters"] == 14 and run_report["schema"] == 1
 
 
 def test_config_check(project, capsys):

@@ -63,7 +63,10 @@ def cluster_key(f: Finding) -> tuple[str, ...]:
             return (f.kind.value, f.path, "image")
         return (f.kind.value, manifest_dir(f.path), f.package or vuln_key(f))
     if f.kind == Kind.IAC:
-        return (f.kind.value, f.path, vuln_key(f))
+        # One cluster per file: tools word the same misconfiguration differently (trivy
+        # "image user should not be root" vs semgrep "missing USER"), and one hardening PR
+        # per Dockerfile/manifest is what a reviewer wants anyway.
+        return (f.kind.value, f.path)
     if f.kind == Kind.LICENSE:
         return (f.kind.value, f.path, f.package or vuln_key(f))
     return (f.kind.value, f.path, f.anchor or str(f.start_line or ""))
@@ -175,7 +178,9 @@ def _cluster_title(kind: Kind, members: list[Finding], c: dict) -> str:
         return f"{pkg}{version}{target}: {shown}"
     lead = max(members, key=lambda f: f.severity.rank)
     line = f":{lead.start_line}" if lead.start_line else ""
-    return f"{lead.title} ({lead.path}{line})"
+    others = len({f.title for f in members}) - 1
+    more = f" +{others} more" if kind == Kind.IAC and others > 0 else ""
+    return f"{lead.title}{more} ({lead.path}{line})"
 
 
 def build_clusters(findings: list[Finding]) -> list[Cluster]:

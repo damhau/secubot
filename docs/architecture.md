@@ -83,7 +83,7 @@ This stage is plain code with no model involved (`sarif.py`, `normalise.py`).
    - code: one location
    - dependency: one package per manifest directory, all advisories together, with a
      target version that fixes all of them and a `breaking_upgrade` flag
-   - IaC: one rule per file
+   - IaC: one cluster per file (tools word the same misconfiguration differently)
    - image: one cluster per image
 
    The cluster id is `sha256(cluster key)[:12]`. It is stable across runs, so it is used as

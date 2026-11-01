@@ -133,3 +133,17 @@ def test_repo_state_load(tmp_path):
     assert state.pulls[0].state == "MERGED"
     assert state.issues[0].cluster_id == "cccccccccccc"
     assert RepoState.load(tmp_path / "missing").branches == set()
+
+
+def test_clusters_only_in_protected_paths_are_report_only(report, cfg):
+    import copy
+
+    from secubot.state import RepoState, select
+
+    rep = copy.deepcopy(report)
+    target = rep.clusters[0]
+    for f in target.findings:
+        f.path = ".github/workflows/release.yml"
+    sel = select(rep, RepoState(), cfg)
+    decision = next(d for d in sel.decisions if d.cluster_id == target.id)
+    assert not decision.selected and "protected path" in decision.reason

@@ -10,7 +10,7 @@ from secubot.normalise import best_fixed_version, is_breaking_upgrade, max_versi
 def test_counts_and_ordering(report):
     assert report.raw_results == 33
     assert len(report.findings) == 28
-    assert len(report.clusters) == 16
+    assert len(report.clusters) == 14  # IaC: one cluster per file
     ranks = [c.severity.rank for c in report.clusters]
     assert ranks == sorted(ranks, reverse=True)
 
@@ -80,3 +80,10 @@ def test_version_helpers():
     assert is_breaking_upgrade("1.2.3", "1.9.0") is False
     assert is_breaking_upgrade("0.3.7", "0.4.0") is True
     assert is_breaking_upgrade(None, "1.0.0") is None
+
+
+def test_iac_findings_cluster_per_file(report):
+    iac = [c for c in report.clusters if c.kind.value == "iac"]
+    assert len(iac) == len({c.path for c in iac})
+    docker = next(c for c in iac if c.path == "Dockerfile")
+    assert len(docker.findings) > 1 and "more" in docker.title

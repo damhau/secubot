@@ -68,13 +68,18 @@ def enabled_tools(repo_root: Path, cfg: SecfixConfig) -> list[str]:
 
 
 def _run(
-    cmd: list[str], cwd: Path, timeout: int = 1800, ok_codes=(0,), stdout_to: Path | None = None
+    cmd: list[str],
+    cwd: Path,
+    timeout: int = 1800,
+    ok_codes=(0,),
+    stdout_to: Path | None = None,
+    env: dict[str, str] | None = None,
 ) -> tuple[bool, str]:
     try:
         proc = subprocess.run(
             cmd,
             cwd=cwd,
-            env=scrubbed_env(),
+            env=scrubbed_env(env),
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -248,7 +253,13 @@ def run_scanner(tool: str, repo_root: Path, out_dir: Path, cfg: SecfixConfig) ->
                 cmd += ["--config", conf]
             for d in _skip_dirs(cfg):
                 cmd += ["--exclude", d]
-            ok, detail = _run([*cmd, "."], repo_root)
+            # semgrep writes settings and logs under $HOME/.semgrep: keep that out of the
+            # runner's home (and working on read-only homes).
+            home = tmp / "home"
+            home.mkdir()
+            ok, detail = _run(
+                [*cmd, "."], repo_root, env={"HOME": str(home), "SEMGREP_SEND_METRICS": "off"}
+            )
             if not ok:
                 return ScanStatus(tool, False, detail)
             _write(_load_rewritten(tmp / "out.sarif", repo_root), target)

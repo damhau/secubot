@@ -8,6 +8,7 @@ import datetime as dt
 import json
 import os
 import sys
+from collections import Counter
 from pathlib import Path
 
 from secubot import __version__
@@ -126,8 +127,14 @@ def cmd_select(args) -> int:
     state = RepoState.load(Path(args.state_dir)) if args.state_dir else RepoState()
     selection = select(report, state, cfg)
     Path(args.out).write_text(selection.model_dump_json(indent=2), encoding="utf-8")
+    skipped: Counter[str] = Counter()
     for d in selection.decisions:
-        print(f"{d.cluster_id} {'SELECTED' if d.selected else 'skip'}: {d.reason}", file=sys.stderr)
+        if d.selected:
+            print(f"{d.cluster_id} SELECTED", file=sys.stderr)
+        else:  # grouped by the reason's stable prefix (reasons embed dates and branch names)
+            skipped[d.reason.split(":")[0].split(" (")[0].split(" secfix/")[0]] += 1
+    for reason, n in skipped.most_common():
+        print(f"{n:5d} skipped: {reason}", file=sys.stderr)
     if args.github_output:
         _gh_output(
             count=str(len(selection.selected)), has_work=str(bool(selection.selected)).lower()

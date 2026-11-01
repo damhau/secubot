@@ -206,11 +206,16 @@ def select(
         if i.cluster_id:
             issues_by_id.setdefault(i.cluster_id, []).append(i)
 
+    protected = cfg.protected_spec()
     decisions: list[Decision] = []
     eligible: list[Cluster] = []
     for c in report.clusters:
         reason = None
-        if c.kind not in policy.kinds:
+        if c.paths and all(protected.match_file(p) for p in c.paths):
+            # e.g. unpinned actions in .github/workflows: secubot may never edit these, so
+            # triage would only spend money. They stay visible in Code Scanning.
+            reason = "in a protected path (report only: secubot never edits CI/agent config)"
+        elif c.kind not in policy.kinds:
             reason = f"kind '{c.kind.value}' not enabled (policy.kinds)"
         elif c.kind == Kind.LICENSE:
             reason = "licence findings are reported only"
