@@ -1,5 +1,9 @@
 # Simple dependency bumps are Dependabot's job; secubot only takes code-level fixes and
 # breaking/major upgrades (policy.dependencies: breaking-only).
+# Security updates are a repository setting, not part of this file:
+#   gh api -X PUT repos/OWNER/REPO/vulnerability-alerts
+#   gh api -X PUT repos/OWNER/REPO/automated-security-fixes
+# Keep one entry per manifest directory and delete the ecosystems you don't use.
 version: 2
 updates:
   - package-ecosystem: gomod
@@ -12,6 +16,15 @@ updates:
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     groups: { python: { patterns: ["*"], update-types: [minor, patch] } }
+  - package-ecosystem: npm # e.g. a frontend under web/
+    directory: /web
+    schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
+    groups: { web: { patterns: ["*"], update-types: [minor, patch] } }
+  - package-ecosystem: docker # base images in the Dockerfile
+    directory: /
+    schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
   - package-ecosystem: github-actions # also keeps the secubot `uses:` ref current
     directory: /
     schedule: { interval: weekly }

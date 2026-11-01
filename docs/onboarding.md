@@ -119,11 +119,52 @@ checkout. The full reference is in [configuration](configuration.md).
 
 ### Dependabot / Renovate
 
-secubot leaves simple bumps to them (`policy.dependencies: breaking-only`). Make sure one
-of them is enabled. There are examples in
-[`examples/target-repo/.github/dependabot.yml`](../examples/target-repo/.github/dependabot.yml)
-and [`renovate.json`](../examples/target-repo/renovate.json). Both also keep the
-`uses: …/secfix.yml@…` pin up to date.
+secubot is designed to run next to one of them. With the default
+`policy.dependencies: breaking-only`, the work is split like this:
+
+| Finding | Handled by |
+|---|---|
+| Vulnerable dependency with a minor or patch fix | **Dependabot/Renovate.** secubot drops it before triage, so it costs nothing |
+| Vulnerable dependency whose fix is a major (or 0.x minor) upgrade | **secubot.** The agent also changes the code the upgrade breaks, and the fix is verified by build, test and rescan |
+| Vulnerable code that is reachable but has no fixed release | **secubot**, as a code-level mitigation or an issue |
+| Code, Dockerfile, IaC and secret findings | **secubot** |
+| Routine version updates, GitHub Actions, base images | **Dependabot/Renovate** |
+
+`policy.bump_uncertain_dependencies` only matters with `dependencies: all`, because with
+`breaking-only` those findings never reach triage. Use `dependencies: all` only on a
+repository that has neither tool. Remove it in the same commit that turns one on, or the
+two open PRs for the same bumps.
+
+**Enable Dependabot.** Security updates (alerts and fix PRs) are repository settings:
+
+```bash
+gh api -X PUT repos/OWNER/REPO/vulnerability-alerts
+gh api -X PUT repos/OWNER/REPO/automated-security-fixes
+```
+
+Version updates need a `.github/dependabot.yml` with one entry per manifest directory.
+Start from [`examples/target-repo/.github/dependabot.yml`](../examples/target-repo/.github/dependabot.yml)
+(Go, uv, npm, Docker, GitHub Actions) or
+[`renovate.json`](../examples/target-repo/renovate.json). The `github-actions` entry (or
+Renovate's digest pinning) also keeps the `uses: …/secfix.yml@…` pin current once it
+points at a release, so secubot upgrades arrive as reviewed PRs. A pin on a branch such
+as `@main` has nothing to bump.
+
+**How they interact:**
+
+- Dependabot and Renovate PRs don't trigger secubot: the caller workflow runs only on its
+  schedule or by hand. secubot scans the default branch, so a finding stays reported
+  until the bump is merged.
+- **The same major upgrade can get two PRs.** secubot only checks its own `secfix/*`
+  branches, not Dependabot's. secubot's PR is usually the one to keep, because it includes
+  the code changes and passed your tests. Closing a secubot PR starts the 90-day
+  cool-down.
+- **secubot doesn't close its own issues and PRs when a finding goes away.** If a merged
+  Dependabot PR (or a manual fix) resolves a finding that has an open secubot issue or
+  PR, close it by hand.
+- Suppressions don't cross over. A secubot suppression or dismissal doesn't dismiss the
+  Dependabot alert, and a dismissed Dependabot alert doesn't suppress the finding in
+  secubot. For dependencies this rarely matters, because the bump is the fix either way.
 
 ## 3. GitHub App for publish (recommended)
 

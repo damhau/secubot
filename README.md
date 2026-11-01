@@ -92,8 +92,19 @@ policy:
   max_prs: 1 # optional: a slow start
 ```
 
-Routine dependency bumps are left to Dependabot or Renovate, so enable one of them
-(`policy.dependencies: all` makes secubot take them instead). Commit and push both files.
+Routine dependency bumps are left to Dependabot or Renovate, so enable one of them. For
+Dependabot, turn on security updates and add a
+[`dependabot.yml`](examples/target-repo/.github/dependabot.yml):
+
+```bash
+gh api -X PUT repos/OWNER/REPO/vulnerability-alerts
+gh api -X PUT repos/OWNER/REPO/automated-security-fixes
+```
+
+secubot then takes only the upgrades that break something and the code-level findings
+([how the two split the work](docs/onboarding.md#dependabot--renovate)). On a repository
+with neither tool, set `policy.dependencies: all` so secubot takes every bump. Commit and
+push the files.
 
 **5. Do a dry run** and watch it:
 
