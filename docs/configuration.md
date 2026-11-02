@@ -58,7 +58,7 @@ configuration and the detected languages. There is an annotated full example at
 | Key | Default | |
 |---|---|---|
 | `version` | `1` | |
-| `languages` | auto | `[go, python]`. Detected from `go.mod`, `pyproject.toml`, `setup.py`, `setup.cfg`, `uv.lock` and `requirements*.txt` outside skipped paths |
+| `languages` | auto | `[go, python, node]` (`node` covers JavaScript and TypeScript). Detected from `go.mod`, `pyproject.toml`, `setup.py`, `setup.cfg`, `uv.lock`, `requirements*.txt` and `package.json` outside skipped paths |
 | `labels` | `[security]` | labels on PRs and issues (created if missing) |
 
 ### `paths`
@@ -109,12 +109,13 @@ Go scanners run only when Go is detected, Python scanners only when Python is.
 | Key | Default | |
 |---|---|---|
 | `min_severity` | `medium` | `info`, `low`, `medium`, `high`, `critical` |
-| `max_triage` | `5` | clusters triaged per run (2 agent sessions each) |
+| `max_triage` | `5` | clusters triaged per run (2 agent sessions each, 1 with `challenge: false`) |
 | `max_prs` | `3` | fix jobs / draft PRs per run. Extra true positives are deferred to the next run |
 | `kinds` | `[code, dependency, iac, secret]` | `license` findings are reported but never acted on |
 | `skip_unreachable` | `true` | drop Go dependency findings that govulncheck proved are not called |
 | `dependencies` | `breaking-only` | `all`, `breaking-only`, or `none`. `breaking-only` leaves non-breaking upgrades to Renovate/Dependabot. It takes upgrades across a major version (or a 0.x minor), and reachable vulnerabilities without a fixed version |
 | `bump_uncertain_dependencies` | `true` | when triage ends `uncertain` on a dependency with a fixed version and the upgrade is non-breaking, attempt the bump anyway (draft PR, verified by build/test/rescan). Major (breaking) upgrades and findings without a fixed version still become issues |
+| `challenge` | `true` | run the adversarial second triage pass. `false` roughly halves the triage cost, but the analysis then decides alone, so a false positive is suppressed only at `high` confidence; below that it becomes an issue. See [security](security.md#prompt-injection-handling) |
 | `auto_suppress` | `true` | record agreed false positives on `secfix-state` |
 | `auto_suppress_max_severity` | `high` | above this, an agreed false positive becomes an issue for a human to confirm |
 | `suppression_ttl_days` | `30` | lifetime of automatic suppressions |
@@ -130,12 +131,20 @@ Go scanners run only when Go is detected, Python scanners only when Python is.
 | `extra_commands` | `[]` | additional Bash commands for the agent: exact strings, or `prefix:*` (prefix match, no shell metacharacters), e.g. `["make lint", "go vet:*"]` |
 | `allow_new_files` | `false` | enable the Write tool and allow added files in the patch |
 | `sensitive_paths` | auth / authn / authz / crypto / security / session / oauth / jwt globs | may only change if the finding itself is located there. Setting it replaces the defaults |
-| `protected_paths` | `[]` | **added to** the built-in list, which can't be removed: `.git/`, `.github/`, `.gitmodules`, `.gitattributes`, `.secfix.yml`, `.secfix/`, `.claude/`, `.mcp.json`, `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.devcontainer/`, `.vscode/`, `.idea/`, `.pre-commit-config.yaml`, `.gitlab-ci.yml`, `CODEOWNERS` |
+| `protected_paths` | `[]` | **added to** the built-in list, which can't be removed: `.git/`, `.github/`, `.gitmodules`, `.gitattributes`, `.secfix.yml`, `.secfix/`, `.claude/`, `.mcp.json`, `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.devcontainer/`, `.vscode/`, `.idea/`, `.pre-commit-config.yaml`, `.gitlab-ci.yml`, `CODEOWNERS`, and package-manager config that can redirect the registry or run code on install: `.npmrc`, `.yarnrc`, `.yarnrc.yml`, `.yarn/`, `.pnpmfile.cjs` |
 | `max_changed_files` | `10` | |
 | `max_changed_lines` | `400` | added + removed |
 
-For dependency clusters, the agent can also run `go get:*` and `go mod tidy` (Go) or
-`uv lock:*` (Python).
+For dependency clusters, the agent can also run `go get:*` and `go mod tidy` (Go),
+`uv lock:*` (Python), or the add and update commands of the project's Node package manager
+(`npm install:*` / `npm update:*`, `pnpm add:*` / `pnpm update:*`, `yarn add:*` /
+`yarn upgrade:*` or `yarn up:*`, `bun add:*` / `bun update:*`). The package manager comes
+from the lock file, else from the `packageManager` field of `package.json`.
+
+For Node, the fix job installs Node with `actions/setup-node`: the version comes from
+`.nvmrc`, `.node-version` or `engines.node` in the top-most `package.json`, else the
+current LTS. pnpm and yarn come from corepack, so a `setup` command for them starts with
+`npm install -g corepack && corepack enable`. `secubot onboard` writes it that way.
 
 ### `models`
 
@@ -144,7 +153,7 @@ For dependency clusters, the agent can also run `go get:*` and `go mod tidy` (Go
 | `triage` | `claude-opus-5-5` | model for both triage passes |
 | `fix` | `claude-opus-5-5` | |
 | `effort` | `high` | `low`, `medium`, `high`, `xhigh`, `max` |
-| `triage_budget_usd` | `3` | hard cap **per session** (a cluster's triage is two sessions) |
+| `triage_budget_usd` | `3` | hard cap **per session** (a cluster's triage is two sessions, one with `policy.challenge: false`) |
 | `fix_budget_usd` | `10` | hard cap per fix session (all attempts share it) |
 | `triage_max_turns` / `fix_max_turns` | `40` / `60` | |
 

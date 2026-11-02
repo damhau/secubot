@@ -150,13 +150,14 @@ Each selected cluster gets two **fresh** Claude Code sessions with read-only too
 | Challenge does not hold (a "holds" that repeats the analysis's verdict counts as not holding) | the analysis verdict |
 | Challenge holds and revises to TP with high confidence | true positive |
 | Challenge holds otherwise | uncertain |
+| No challenge (`policy.challenge: false`) | the analysis verdict |
 
 | Final verdict | Action |
 |---|---|
 | Either pass flags suspected prompt injection | **issue** (whatever the verdict) |
 | TP, kind `secret` | **issue**: rotate first (a human job) |
 | TP | **fix** |
-| FP, `auto_suppress` on, severity ≤ `auto_suppress_max_severity` | **suppress** for `suppression_ttl_days`, with the reasoning as the reason |
+| FP, `auto_suppress` on, severity ≤ `auto_suppress_max_severity` (and, without a challenge, analysis confidence `high`) | **suppress** for `suppression_ttl_days`, with the reasoning as the reason |
 | FP otherwise | **issue** asking a human to confirm |
 | uncertain, kind `dependency`, non-breaking upgrade to a fixed version, `bump_uncertain_dependencies` on | **fix**: a verified bump is cheaper than proving reachability |
 | uncertain otherwise | **issue** |
@@ -187,8 +188,8 @@ setup (scrubbed env) ─▶ agent turn ─▶ blocked/injection? ─▶ stop: bl
 - **Tools.** Read/Grep/Glob, Edit (Write only with `fix.allow_new_files`), and Bash
   limited to an exact allowlist: the configured `build` and `test` commands,
   `secubot recheck`, `fix.extra_commands`, and for dependency clusters `go get:*` /
-  `go mod tidy` / `uv lock:*`. A `prefix:*` entry matches by prefix and refuses shell
-  metacharacters.
+  `go mod tidy` / `uv lock:*` or the Node package manager's add/update commands. A
+  `prefix:*` entry matches by prefix and refuses shell metacharacters.
 - **The prompt** (`prompts/fix.md`) gives the triage reasoning and fix plan, the finding as
   data inside `<untrusted>` tags, the commands, and limits on files and lines changed. It
   asks for the smallest change that removes the vulnerability and keeps behaviour.
@@ -288,3 +289,4 @@ See [onboarding](onboarding.md#control-plane-optional).
 | `render.py`, `publish.py` | sanitised markdown; branches, PRs, issues, state commits |
 | `report.py`, `fleet.py` | run report; control plane dispatch and dashboard |
 | `cli.py` | `secubot <subcommand>`, one per workflow step |
+| `onboard/` | `secubot onboard` wizard (local only, `onboard` extra): analyse a clone, render `.secfix.yml` / caller / `dependabot.yml`, set secrets and settings through `gh`, open the PR. `settings.py` reads `~/.config/secubot/config.toml` |

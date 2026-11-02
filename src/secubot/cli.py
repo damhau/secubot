@@ -12,7 +12,7 @@ from collections import Counter
 from pathlib import Path
 
 from secubot import __version__
-from secubot.config import detect_languages, load_config
+from secubot.config import detect_languages, load_config, node_version_file
 
 
 def _gh_output(**values: object) -> None:
@@ -69,16 +69,19 @@ def cmd_detect(args) -> int:
     cfg = _cfg(args)
     langs = detect_languages(_repo(args), cfg)
     tools = enabled_tools(_repo(args), cfg)
+    node_version = node_version_file(_repo(args), cfg) if "node" in langs else ""
     if args.github_output:
         _gh_output(
             languages=langs,
             tools=tools,
             go=str("go" in langs).lower(),
             python=str("python" in langs).lower(),
+            node=str("node" in langs).lower(),
+            node_version_file=node_version,
             image=str("trivy-image" in tools).lower(),
         )
     else:
-        print(json.dumps({"languages": langs, "tools": tools}))
+        print(json.dumps({"languages": langs, "tools": tools, "node_version_file": node_version}))
     return 0
 
 
@@ -386,6 +389,12 @@ def cmd_fleet_report(args) -> int:
 # -- parser -----------------------------------------------------------------------------------
 
 
+def cmd_onboard(args) -> int:
+    from secubot.onboard.wizard import run
+
+    return run(args)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="secubot", description=__doc__)
     p.add_argument("--version", action="version", version=f"secubot {__version__}")
@@ -465,6 +474,39 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("fleet-report", cmd_fleet_report, "collect run reports into a dashboard", repo=False)
     sp.add_argument("--fleet", required=True)
     sp.add_argument("--out", required=True)
+
+    sp = add(
+        "onboard",
+        cmd_onboard,
+        "wizard: set secubot up on a GitHub repository (secrets, settings, files, PR)",
+        repo=False,
+    )
+    sp.add_argument("target", metavar="OWNER/REPO")
+    sp.add_argument("--yes", action="store_true", help="take every default, ask nothing")
+    sp.add_argument(
+        "--dry-run", action="store_true", help="show the plan and files, change nothing"
+    )
+    sp.add_argument(
+        "--config", help="TOML defaults (default: ~/.config/secubot/config.toml, $SECUBOT_CONFIG)"
+    )
+    sp.add_argument("--api-key-file", help="file with the Anthropic API key (replaces the secret)")
+    sp.add_argument("--no-api-key", action="store_true", help="leave ANTHROPIC_API_KEY as it is")
+    sp.add_argument("--app-id", help="GitHub App ID for publish")
+    sp.add_argument("--app-key", help="the App's private key .pem")
+    sp.add_argument("--no-app", action="store_true", help="don't set up a GitHub App")
+    sp.add_argument(
+        "--dependabot",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="add dependabot.yml and turn on alerts and security updates (default: yes)",
+    )
+    sp.add_argument("--setup", help="setup command (default: detected)")
+    sp.add_argument("--build", help="build command (default: detected)")
+    sp.add_argument("--test", help="test command (default: detected)")
+    sp.add_argument("--skip", help="extra paths to skip, comma-separated")
+    sp.add_argument("--branch", help="branch for the PR (default: secubot/onboarding)")
+    sp.add_argument("--secubot-repo", help="central repository (default: damhau/secubot)")
+    sp.add_argument("--ref", help="ref of the reusable workflow (default: the major, v1)")
     return p
 
 

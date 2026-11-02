@@ -42,6 +42,7 @@ policy:
   skip_unreachable: true # drop deps govulncheck proved are not called
   dependencies: breaking-only # all | breaking-only | none (simple bumps = Dependabot/Renovate)
   bump_uncertain_dependencies: true # uncertain + non-breaking upgrade: try the bump anyway
+  challenge: true # adversarial 2nd triage pass; false = about half the cost, FPs suppressed only at high confidence
   auto_suppress: true
   auto_suppress_max_severity: high # agreed FPs above this become issues instead
   suppression_ttl_days: 30

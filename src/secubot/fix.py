@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 
 from secubot import prompts
 from secubot.agent import AgentFactory, SessionSpec
-from secubot.config import SecfixConfig
+from secubot.config import SecfixConfig, node_package_manager
 from secubot.gate import Gate, GatePolicy
 from secubot.models import Cluster, Kind, ScanReport
 from secubot.normalise import normalise
@@ -240,6 +240,18 @@ def working_tree_diff(repo_root: Path, new_files: list[str]) -> str:
 # -- the loop ---------------------------------------------------------------------------------
 
 
+# How each Node package manager upgrades a dependency and rewrites its lock file. The agent
+# runs from the repository root: `npm install --prefix web pkg@1.2.3` and
+# `pnpm add pkg@1.2.3 --dir web` reach a project in a subdirectory.
+NODE_UPGRADE_COMMANDS = {
+    "npm": ["npm install:*", "npm update:*"],
+    "pnpm": ["pnpm add:*", "pnpm update:*"],
+    "yarn": ["yarn add:*", "yarn upgrade:*"],
+    "yarn-berry": ["yarn add:*", "yarn up:*"],
+    "bun": ["bun add:*", "bun update:*"],
+}
+
+
 def agent_commands(cluster: Cluster, cfg: SecfixConfig, repo_root: Path) -> list[str]:
     cmds = [c for c in (cfg.commands.build, cfg.commands.test) if c]
     cmds.append(RECHECK_COMMAND)
@@ -249,6 +261,8 @@ def agent_commands(cluster: Cluster, cfg: SecfixConfig, repo_root: Path) -> list
             cmds += ["go mod tidy", "go get:*"]
         if (mdir / "uv.lock").is_file():
             cmds += ["uv lock:*"]
+        if (mdir / "package.json").is_file():
+            cmds += NODE_UPGRADE_COMMANDS[node_package_manager(mdir, repo_root)]
     cmds += cfg.fix.extra_commands
     return list(dict.fromkeys(cmds))
 

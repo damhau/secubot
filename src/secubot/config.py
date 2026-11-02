@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
 from pathlib import Path
 from typing import Literal
@@ -39,6 +40,12 @@ BUILTIN_PROTECTED_PATHS = [
     ".gitlab-ci.yml",
     "CODEOWNERS",
     "**/CODEOWNERS",
+    # Package-manager configuration that can redirect the registry or run code on install.
+    ".npmrc",
+    ".yarnrc",
+    ".yarnrc.yml",
+    ".yarn/",
+    ".pnpmfile.cjs",
 ]
 
 DEFAULT_SENSITIVE_PATHS = [
@@ -124,6 +131,10 @@ class Policy(_Strict):
     bump_uncertain_dependencies: bool = True
     """When triage can't settle a dependency finding, still try the upgrade (draft PR, verified
     by build/test/rescan) if it is non-breaking and has a fixed version. Otherwise: an issue."""
+    challenge: bool = True
+    """Run the adversarial second triage pass. Off roughly halves triage cost, but a false
+    positive is then suppressed on one pass's word, so only at high confidence (else: an
+    issue)."""
     auto_suppress: bool = True
     """Record agreed false positives in the state branch instead of opening anything."""
     auto_suppress_max_severity: Severity = Severity.HIGH
@@ -187,8 +198,9 @@ class Suppression(_Strict):
 
 class SecfixConfig(_Strict):
     version: Literal[1] = 1
-    languages: list[Literal["go", "python"]] | None = None
-    """Auto-detected from go.mod / pyproject.toml / requirements*.txt when omitted."""
+    languages: list[Literal["go", "python", "node"]] | None = None
+    """Auto-detected from go.mod / pyproject.toml / requirements*.txt / package.json when
+    omitted. `node` covers JavaScript and TypeScript."""
     paths: Paths = Field(default_factory=Paths)
     commands: Commands = Field(default_factory=Commands)
     scanners: Scanners = Field(default_factory=Scanners)
@@ -262,6 +274,71 @@ def python_projects(repo_root: Path, cfg: SecfixConfig) -> list[Path]:
     return sorted({p.parent for p in iter_files(repo_root, cfg.skip_spec(), PYTHON_MARKERS)})
 
 
+def node_projects(repo_root: Path, cfg: SecfixConfig) -> list[Path]:
+    return sorted({p.parent for p in iter_files(repo_root, cfg.skip_spec(), {"package.json"})})
+
+
+NODE_LOCKFILES = {
+    "pnpm-lock.yaml": "pnpm",
+    "yarn.lock": "yarn",
+    "package-lock.json": "npm",
+    "npm-shrinkwrap.json": "npm",
+    "bun.lock": "bun",
+}
+
+
+def node_package_manager(project: Path, repo_root: Path) -> str:
+    """npm, pnpm, yarn (classic), yarn-berry or bun: from the lock file in `project` or the
+    nearest parent up to the repository root (workspaces keep one lock file at the top),
+    else from package.json's `packageManager` field, else npm."""
+    d = project
+    while True:
+        for lockfile, manager in NODE_LOCKFILES.items():
+            if (d / lockfile).is_file():
+                if manager == "yarn" and (d / ".yarnrc.yml").is_file():
+                    return "yarn-berry"
+                return manager
+        if d == repo_root or d.parent == d:
+            break
+        d = d.parent
+    try:
+        manifest = json.loads((project / "package.json").read_text(encoding="utf-8"))
+        declared = str(manifest.get("packageManager", "")) if isinstance(manifest, dict) else ""
+    except (OSError, ValueError):
+        declared = ""
+    name, _, version = declared.partition("@")
+    if name == "yarn":
+        return "yarn" if version.startswith("1.") else "yarn-berry"
+    return name if name in {"pnpm", "bun"} else "npm"
+
+
+def node_version_file(repo_root: Path, cfg: SecfixConfig) -> str:
+    """The file actions/setup-node should read the Node version from ("" = latest LTS).
+
+    Looks in the top-most Node project: `.nvmrc`, `.node-version`, then a package.json that
+    pins the version (`engines.node`, `volta.node`, `devEngines.runtime`).
+    """
+    projects = sorted(node_projects(repo_root, cfg), key=lambda p: len(p.parts))
+    if not projects:
+        return ""
+    top = projects[0]
+    for name in (".nvmrc", ".node-version"):
+        if (top / name).is_file():
+            return (top / name).relative_to(repo_root).as_posix()
+    try:
+        manifest = json.loads((top / "package.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+
+    def field(section: str, key: str) -> object:
+        value = manifest.get(section) if isinstance(manifest, dict) else None
+        return value.get(key) if isinstance(value, dict) else None
+
+    if field("engines", "node") or field("volta", "node") or field("devEngines", "runtime"):
+        return (top / "package.json").relative_to(repo_root).as_posix()
+    return ""
+
+
 def detect_languages(repo_root: Path, cfg: SecfixConfig) -> list[str]:
     if cfg.languages:
         return list(cfg.languages)
@@ -270,4 +347,6 @@ def detect_languages(repo_root: Path, cfg: SecfixConfig) -> list[str]:
         langs.append("go")
     if python_projects(repo_root, cfg):
         langs.append("python")
+    if node_projects(repo_root, cfg):
+        langs.append("node")
     return langs

@@ -1,6 +1,9 @@
 """Triage: read-only analysis, then an independent adversarial challenge, then a
 deterministic reconciliation. The model never decides the action on its own: code maps
 (analysis, challenge, policy) to fix / suppress / issue.
+
+`policy.challenge: false` skips the challenge. The analysis verdict then stands alone, and
+a false positive is suppressed only at high confidence.
 """
 
 from __future__ import annotations
@@ -130,14 +133,20 @@ class TriageResult(BaseModel):
 
 
 def reconcile(
-    cluster: Cluster, a: Analysis, c: Challenge, cfg: SecfixConfig
+    cluster: Cluster, a: Analysis, c: Challenge | None, cfg: SecfixConfig
 ) -> tuple[Verdict, Action, str]:
-    """Deterministic decision table. Errs towards a human when the two passes disagree."""
-    if c.challenge_holds and c.revised_verdict == a.verdict:
+    """Deterministic decision table. Errs towards a human when the two passes disagree.
+
+    `c` is None when the challenge was skipped (`policy.challenge: false`).
+    """
+    if c is not None and c.challenge_holds and c.revised_verdict == a.verdict:
         c = c.model_copy(update={"challenge_holds": False})  # self-contradictory challenge
 
-    if not c.challenge_holds:
+    if c is None:
         final: Verdict = a.verdict
+        why = "single analysis pass (policy.challenge is off)"
+    elif not c.challenge_holds:
+        final = a.verdict
         why = "analysis upheld by adversarial review"
     elif c.revised_verdict == "true_positive" and c.confidence == "high":
         final = "true_positive"
@@ -146,7 +155,7 @@ def reconcile(
         final = "uncertain"
         why = "analysis and adversarial review disagree"
 
-    if a.injection_suspected or c.injection_suspected:
+    if a.injection_suspected or (c is not None and c.injection_suspected):
         return final, "issue", "possible prompt injection in repository content; needs a human"
 
     if final == "true_positive":
@@ -164,6 +173,13 @@ def reconcile(
                     f"{why}, but scanner severity {cluster.severity.value} is above "
                     "policy.auto_suppress_max_severity: confirm before suppressing"
                 ),
+            )
+        if c is None and a.confidence != "high":
+            # No second opinion: one pass that was fooled must not hide a finding.
+            return (
+                final,
+                "issue",
+                f"{why}, at {a.confidence} confidence: confirm before suppressing",
             )
         return final, "suppress", why
     if (
@@ -239,42 +255,49 @@ async def triage_cluster(
             cost_usd=cost,
         )
 
-    # Fresh session: the challenger must not inherit the analyst's context or framing.
-    spec_c = _session(cfg, repo_root, CHALLENGE_SCHEMA)
-    analysis_text = prompts.neutralise(json.dumps(analysis.model_dump(mode="json"), indent=2))
-    turn_c = await _one_turn(
-        factory,
-        spec_c,
-        prompts.render(prompts.load("triage_challenge"), finding=finding, analysis=analysis_text),
-    )
-    cost += turn_c.cost_usd
-    if turn_c.is_error or turn_c.structured is None:
-        return TriageResult(
-            cluster_id=cluster.id,
-            action="error",
-            reason="challenge failed",
-            error=turn_c.error or "no structured output",
-            analysis=analysis,
-            cost_usd=cost,
+    challenge: Challenge | None = None
+    denied = _denials(spec_a)
+    if cfg.policy.challenge:
+        # Fresh session: the challenger must not inherit the analyst's context or framing.
+        spec_c = _session(cfg, repo_root, CHALLENGE_SCHEMA)
+        analysis_text = prompts.neutralise(json.dumps(analysis.model_dump(mode="json"), indent=2))
+        turn_c = await _one_turn(
+            factory,
+            spec_c,
+            prompts.render(
+                prompts.load("triage_challenge"), finding=finding, analysis=analysis_text
+            ),
         )
-    try:
-        challenge = Challenge.model_validate(turn_c.structured)
-    except ValueError as exc:
-        return TriageResult(
-            cluster_id=cluster.id,
-            action="error",
-            reason="invalid challenge",
-            error=str(exc)[:500],
-            analysis=analysis,
-            cost_usd=cost,
-        )
+        cost += turn_c.cost_usd
+        denied += _denials(spec_c)
+        if turn_c.is_error or turn_c.structured is None:
+            return TriageResult(
+                cluster_id=cluster.id,
+                action="error",
+                reason="challenge failed",
+                error=turn_c.error or "no structured output",
+                analysis=analysis,
+                cost_usd=cost,
+            )
+        try:
+            challenge = Challenge.model_validate(turn_c.structured)
+        except ValueError as exc:
+            return TriageResult(
+                cluster_id=cluster.id,
+                action="error",
+                reason="invalid challenge",
+                error=str(exc)[:500],
+                analysis=analysis,
+                cost_usd=cost,
+            )
 
     final, action, why = reconcile(cluster, analysis, challenge, cfg)
     suppression = None
     if action == "suppress":
+        passes = "" if challenge else ", single pass"
         suppression = Suppression(
             id=cluster.id,
-            reason=f"secubot triage: false positive ({analysis.confidence} confidence). "
+            reason=f"secubot triage: false positive ({analysis.confidence} confidence{passes}). "
             + analysis.reasoning[:400],
             expires=today + dt.timedelta(days=cfg.policy.suppression_ttl_days),
             created=today,
@@ -289,5 +312,5 @@ async def triage_cluster(
         challenge=challenge,
         cost_usd=cost,
         suppression=suppression,
-        denied_tool_calls=_denials(spec_a) + _denials(spec_c),
+        denied_tool_calls=denied,
     )

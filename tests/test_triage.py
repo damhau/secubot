@@ -36,6 +36,36 @@ def test_reconcile_table(report, a, c, verdict, action):
     assert got[:2] == (verdict, action)
 
 
+@pytest.mark.parametrize(
+    ("a", "confidence", "verdict", "action"),
+    [
+        ("true_positive", "low", "true_positive", "fix"),
+        ("false_positive", "high", "false_positive", "suppress"),
+        # no second opinion: below high confidence, a human confirms the false positive
+        ("false_positive", "medium", "false_positive", "issue"),
+        ("uncertain", "high", "uncertain", "issue"),
+    ],
+)
+def test_reconcile_without_challenge(report, a, confidence, verdict, action):
+    cluster = cluster_by(report, path="goapp/main.go", line=19)
+    cfg = SecfixConfig.model_validate(
+        {"policy": {"challenge": False, "auto_suppress_max_severity": "critical"}}
+    )
+    got = reconcile(cluster, Analysis.model_validate(analysis(a, confidence=confidence)), None, cfg)
+    assert got[:2] == (verdict, action)
+    assert "single analysis pass" in got[2]
+
+
+def test_challenge_off_runs_one_session(report, project):
+    cluster = cluster_by(report, path="goapp/main.go", line=19)
+    cfg = SecfixConfig.model_validate({"policy": {"challenge": False}})
+    factory = FakeFactory([[analysis("false_positive", confidence="high")]])
+    result = asyncio.run(triage_cluster(cluster, cfg, project, factory, TODAY))
+    assert len(factory.prompts) == 1 and factory.closed == 1
+    assert result.challenge is None and result.cost_usd == 0.5
+    assert result.action == "suppress" and "single pass" in result.suppression.reason
+
+
 def test_uncertain_dependency_gets_a_non_breaking_bump(report):
     dep = next(c for c in report.clusters if c.kind == Kind.DEPENDENCY and c.target_version)
     unsure = Analysis.model_validate(analysis("uncertain"))

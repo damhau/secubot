@@ -42,6 +42,106 @@ PRs (`@v1` → a digest pin, via Renovate/Dependabot).
 
 ## 2. Onboard a repository
 
+### The wizard
+
+`secubot onboard` does this whole section for one repository. Run it from a checkout of
+secubot, with `gh` logged in as an admin of the repository:
+
+```bash
+uv run --extra onboard secubot onboard OWNER/REPO
+uv run --extra onboard secubot onboard OWNER/REPO --app-id 123456 --app-key secubot.pem
+uv run --extra onboard secubot onboard OWNER/REPO --dry-run   # show everything, change nothing
+```
+
+1. **Checks** that you are an admin of the repository. To push a workflow file, `gh` also
+   needs the `workflow` scope (`gh auth refresh -s workflow`).
+2. **Clones** the default branch into a temporary folder (deleted afterwards) and detects:
+   - Go modules, Python projects (uv, poetry or pip) and Node projects (npm, pnpm, yarn or
+     bun; TypeScript included), with their tests
+   - Dockerfiles
+   - an existing caller workflow, `.secfix.yml`, Dependabot or Renovate configuration
+3. **Asks**, with the detected value as the default:
+   - the setup, build and test commands
+   - paths to skip
+   - whether to add `.github/dependabot.yml` and turn on Dependabot alerts and security
+     updates
+   - whether to use a GitHub App
+   - the API key: from `--api-key-file`, the [config file](#wizard-defaults) or
+     `$ANTHROPIC_API_KEY` (it shows only the key's last characters), else it prompts
+4. **Shows the plan** and waits for "Go ahead?". Nothing changes before that.
+5. **Does it**, in this order:
+   - adds the repository to the GitHub App's installation, if needed (below)
+   - sets the secrets, on stdin to `gh`
+   - turns on Dependabot alerts and security updates
+   - without an App, allows `GITHUB_TOKEN` to create PRs
+   - opens a PR from `secubot/onboarding` adding the missing files
+
+It never overwrites a file the repository already has. The caller it writes starts with
+`dry-run: true` and `egress-policy: audit`, the same as in the steps below. With an App, it
+first checks that the App ID and the `.pem` belong together, so a mismatch fails here
+rather than in publish. Then it checks where the App is installed:
+
+- **On the repository:** nothing to do.
+- **On the owner, with "Only select repositories":** after "Go ahead?", it adds the
+  repository to that installation through the API. If GitHub refuses that for your `gh`
+  login's token, it prints the installation's settings page and waits while you tick the
+  repository there.
+- **Not on the owner at all:** GitHub has no API to create the first installation, so it
+  prints the App's install page and waits. This happens once per account or organisation.
+
+`--yes` takes every default and asks nothing. When a repository already has a secret, the
+default is to keep it, unless you pass the value on the command line. So re-running the
+wizard with `--api-key-file` rotates the key, without touching the files the repository
+already has:
+
+```bash
+for r in OWNER/A OWNER/B; do
+  uv run --extra onboard secubot onboard "$r" --yes --no-dependabot --no-app \
+    --api-key-file <(cred get anthropic/secubot)
+done
+```
+
+`<(…)` hands the wizard the output of your password manager (`cred`, `pass show`,
+`op read`, …) as a file, so the key never lands on disk.
+
+#### Wizard defaults
+
+Answers that are the same for every repository go in `~/.config/secubot/config.toml`
+(`$XDG_CONFIG_HOME` is honoured; `--config PATH` or `$SECUBOT_CONFIG` pick another file):
+
+```toml
+[onboard]
+# secubot_repo = "damhau/secubot"   # your fork
+# ref = "v1"                        # default: the current major
+# branch = "secubot/onboarding"
+# dependabot = true                 # false: like --no-dependabot
+
+# Where the secrets come from. The file never holds them: a path, or a command that
+# prints the value (run without a shell; its output is never shown).
+api_key_command = "cred get anthropic/secubot"   # or api_key_file = "~/…"
+app_id = 123456
+app_key_command = "cred get secubot/app-key"     # or app_key_file = "~/secubot.pem"
+```
+
+A command-line flag wins over the file, and the file wins over `$ANTHROPIC_API_KEY`.
+`--no-app` skips the App for one repository. Unknown keys are an error, so a typo doesn't
+go unnoticed. If the file sets a `*_command`, it must not be writable by others
+(`chmod go-w`), because those commands run as you.
+
+The generated `.github/dependabot.yml` has one entry per ecosystem, covering every manifest
+directory. Each entry has:
+
+- a weekly schedule and a 7-day cooldown
+- one group for minor and patch updates
+- one group for security updates (security updates skip the cooldown)
+
+Major updates stay separate PRs, because those are the upgrades secubot takes when they
+break something. GitHub Actions updates, majors included, come as one PR. Without
+Dependabot or Renovate, the wizard sets `policy.dependencies: all` instead (see
+[Dependabot / Renovate](#dependabot--renovate)).
+
+The sections below are what it sets up, for doing it by hand.
+
 ### Secrets
 
 | Secret | Required | Notes |
@@ -49,6 +149,10 @@ PRs (`@v1` → a digest pin, via Renovate/Dependabot).
 | `ANTHROPIC_API_KEY` | yes | Use a **dedicated Anthropic workspace** for secubot with a monthly spend limit. Store it as an org secret limited to the onboarded repositories |
 | `SECUBOT_READ_TOKEN` | if the central repo is private | see above |
 | `SECUBOT_APP_ID`, `SECUBOT_APP_PRIVATE_KEY` | recommended | GitHub App used by publish (below) |
+
+A personal account has no account-wide Actions secrets, and organisation secrets reach
+private repositories only on paid plans. In both cases every repository holds its own copy,
+which [the wizard](#the-wizard) sets for you.
 
 The caller has to pass secrets explicitly. Don't use `secrets: inherit`, because the
 reusable workflow should only receive what it needs.
@@ -174,8 +278,8 @@ PRs opened with `GITHUB_TOKEN` don't trigger `pull_request` workflows, so the re
 CI would never run on them. A GitHub App fixes that and removes the need for the
 "Actions may create PRs" setting.
 
-1. Create an App (org settings → Developer settings → GitHub Apps). No webhook, no
-   callback URL.
+1. Create an App (org settings, or your own settings for a personal account → Developer
+   settings → GitHub Apps). No webhook, no callback URL.
 2. Give it these **repository permissions**:
    - Contents: read & write
    - Pull requests: read & write
@@ -186,7 +290,8 @@ CI would never run on them. A GitHub App fixes that and removes the need for the
    `.github/`, so it isn't needed, and without it a token leak can't change CI.
 3. Install it only on the onboarded repositories.
 4. Store `SECUBOT_APP_ID` and `SECUBOT_APP_PRIVATE_KEY` as org secrets scoped to those
-   repositories, and pass them in the caller:
+   repositories, or per repository with [the wizard](#the-wizard) (`--app-id ID --app-key
+   FILE`), and pass them in the caller:
 
 ```yaml
     secrets:

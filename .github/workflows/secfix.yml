@@ -83,6 +83,8 @@ jobs:
       has_resolved: ${{ steps.select.outputs.has_resolved }}
       tools: ${{ steps.detect.outputs.tools }}
       go: ${{ steps.detect.outputs.go }}
+      node: ${{ steps.detect.outputs.node }}
+      node_version_file: ${{ steps.detect.outputs.node_version_file }}
       sha: ${{ steps.meta.outputs.sha }}
       ref_name: ${{ steps.meta.outputs.ref_name }}
     steps:
@@ -345,6 +347,7 @@ jobs:
             go.dev:443 dl.google.com:443
             mirror.gcr.io:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
             semgrep.dev:443
+            registry.npmjs.org:443 registry.yarnpkg.com:443 repo.yarnpkg.com:443 nodejs.org:443
             azure.archive.ubuntu.com:80 archive.ubuntu.com:80 security.ubuntu.com:80
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -368,6 +371,15 @@ jobs:
         with:
           go-version-file: target/${{ inputs.go-version-file }}
           cache: false
+      - name: Set up Node
+        if: needs.scan.outputs.node == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # .nvmrc / .node-version / a package.json that pins it, else the latest LTS.
+          node-version: ${{ needs.scan.outputs.node_version_file == '' && 'lts/*' || '' }}
+          node-version-file: ${{ needs.scan.outputs.node_version_file && format('target/{0}', needs.scan.outputs.node_version_file) || '' }}
+          # No cache: a cache written by one run must not feed the next one's install.
+          package-manager-cache: false
       - name: Install pinned scanners
         env:
           TOOLS: ${{ needs.scan.outputs.tools }}
@@ -392,6 +404,11 @@ jobs:
           TRIVY_CACHE_DIR: ${{ runner.temp }}/trivy-cache
           SEMGREP_SEND_METRICS: "off"
           GOTOOLCHAIN: local
+          # pnpm/yarn through corepack, without the interactive download prompt.
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+          NPM_CONFIG_AUDIT: "false"
+          NPM_CONFIG_FUND: "false"
+          NPM_CONFIG_UPDATE_NOTIFIER: "false"
         run: |
           [[ "$CLUSTER" =~ ^[0-9a-f]{12}$ ]] || { echo "bad cluster id"; exit 1; }
           secubot fix --repo target --config "$CONFIG" --scan-dir scan --triage-dir triage \

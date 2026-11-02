@@ -39,6 +39,24 @@ You need `gh` logged in with admin access to the repository, and an Anthropic AP
 ideally from a dedicated workspace with a monthly spend limit. Replace `OWNER/REPO` below.
 In a fork of secubot, also replace `damhau/secubot` with yours.
 
+**The wizard** does steps 1 to 4 in one go. From a checkout of secubot:
+
+```bash
+uv run --extra onboard secubot onboard OWNER/REPO
+```
+
+It clones the repository into a temporary folder and detects its Go, Python and
+Node/TypeScript projects and their tests. It asks a few questions (build and test commands,
+Dependabot, GitHub App, API key) and shows the plan. Then it sets the secrets and
+repository settings, and opens a PR with the caller workflow, `.secfix.yml` and a grouped
+`.github/dependabot.yml`. Existing files are never overwritten. `--dry-run` shows the plan
+and the files without changing anything, `--yes` takes every default. Defaults such as
+the App ID and where to get the API key (`cred get …`, `pass show …`) can go in
+`~/.config/secubot/config.toml`. Then continue at step 5.
+[More in onboarding](docs/onboarding.md#the-wizard).
+
+By hand:
+
 **1. Add the API key as a secret** (`gh` prompts for it, so it never lands in your history):
 
 ```bash
@@ -82,8 +100,8 @@ example](examples/target-repo/.secfix.yml)):
 ```yaml
 version: 1
 commands:
-  setup: uv sync --frozen # Go: go mod download
-  test: uv run pytest -q # Go: go test ./...
+  setup: uv sync --frozen # Go: go mod download, Node: npm ci
+  test: uv run pytest -q # Go: go test ./..., Node: npm test
 paths:
   ignore_protected: true # optional: leave GitHub Actions findings to Code Scanning
 policy:

@@ -95,7 +95,10 @@ rights.
   `injection_suspected`. That forces an issue for a human and stops the fix.
 - **Two-pass triage.** One pass that was fooled into "false positive" isn't enough to
   suppress a finding, because an independent adversarial pass has to agree. A
-  suppression is also limited by severity and always expires.
+  suppression is also limited by severity and always expires. `policy.challenge: false`
+  drops the second pass, roughly halving the cost. Then a single pass suppresses only at
+  high confidence, and a well-crafted injection that also fakes high confidence can hide
+  a finding until the suppression expires.
 - **Rendered output is sanitised.** Model and scanner text in PRs and issues gets
   `@`-mentions, `#123` / `GH-1` references, HTML, links, images and bidi controls
   neutralised, and code fences grow so the content can't break out. A manipulated model
@@ -108,8 +111,8 @@ from the fix artifact). It rejects:
 
 - **Protected paths** that execute in CI or configure the agent or the pipeline:
   `.github/`, `.git*`, `.secfix.yml`, `.claude/`, `.mcp.json`, `CLAUDE.md`, `AGENTS.md`,
-  `.devcontainer/`, `.vscode/`, `.pre-commit-config.yaml`, `CODEOWNERS`, … plus
-  `fix.protected_paths`.
+  `.devcontainer/`, `.vscode/`, `.pre-commit-config.yaml`, `CODEOWNERS`, `.npmrc`,
+  `.yarnrc.yml`, `.pnpmfile.cjs`, … plus `fix.protected_paths`.
 - **Sensitive paths** (auth, crypto, session, OAuth, JWT), unless the finding itself is
   located there.
 - **Unusual file operations:** deletions, renames, binary changes, symlinks, submodules,
@@ -169,9 +172,9 @@ rolling out to sensitive repositories.
      key with a spend limit**, rotated regularly.
    - If this matters to you, leave `commands.test` empty for untrusted repositories.
      Verification then relies on the rescan.
-3. **Network inside the agent sandbox.** Whether `go get` / `uv lock` (dependency clusters)
-   can reach the network from inside bubblewrap has **not been verified**. It fails safe:
-   the fix fails and becomes an issue.
+3. **Network inside the agent sandbox.** Whether `go get` / `uv lock` / `npm install`
+   (dependency clusters) can reach the network from inside bubblewrap has **not been
+   verified**. It fails safe: the fix fails and becomes an issue.
 4. **Artifact tampering by a fix job.** Code running in a fix job could in principle
    upload a different `patch.diff` with the runner's artifact token. Publish's
    re-validation limits the damage to what a malicious agent could do anyway: a
