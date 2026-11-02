@@ -21,7 +21,7 @@ on:
       secubot-ref:
         description: Ref of the central repository to run. Stamped by scripts/release.sh.
         type: string
-        default: "v1.0.0"
+        default: "v1.1.0"
       config-path:
         description: Path of the configuration file in the target repository
         type: string
