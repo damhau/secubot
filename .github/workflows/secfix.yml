@@ -194,7 +194,7 @@ jobs:
       - name: Upload SARIF (trivy-fs)
         if: inputs.code-scanning && hashFiles('scan/sarif/trivy-fs.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: scan/sarif/trivy-fs.sarif
           category: secubot/trivy-fs
@@ -202,7 +202,7 @@ jobs:
       - name: Upload SARIF (trivy-image)
         if: inputs.code-scanning && hashFiles('scan/sarif/trivy-image.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: scan/sarif/trivy-image.sarif
           category: secubot/trivy-image
@@ -210,7 +210,7 @@ jobs:
       - name: Upload SARIF (govulncheck)
         if: inputs.code-scanning && hashFiles('scan/sarif/govulncheck.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: scan/sarif/govulncheck.sarif
           category: secubot/govulncheck
@@ -218,7 +218,7 @@ jobs:
       - name: Upload SARIF (gosec)
         if: inputs.code-scanning && hashFiles('scan/sarif/gosec.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: scan/sarif/gosec.sarif
           category: secubot/gosec
@@ -226,7 +226,7 @@ jobs:
       - name: Upload SARIF (bandit)
         if: inputs.code-scanning && hashFiles('scan/sarif/bandit.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: scan/sarif/bandit.sarif
           category: secubot/bandit
@@ -234,7 +234,7 @@ jobs:
       - name: Upload SARIF (pip-audit)
         if: inputs.code-scanning && hashFiles('scan/sarif/pip-audit.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: scan/sarif/pip-audit.sarif
           category: secubot/pip-audit
@@ -242,7 +242,7 @@ jobs:
       - name: Upload SARIF (semgrep)
         if: inputs.code-scanning && hashFiles('scan/sarif/semgrep.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: scan/sarif/semgrep.sarif
           category: secubot/semgrep
