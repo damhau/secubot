@@ -383,6 +383,10 @@ Setup:
    while onboarding), or set `enabled: false`.
 4. Dispatch one repository by hand with **Run workflow → action: dispatch, repo:
    org/name**.
+5. Turn on the schedule: set the repository variable `SECUBOT_CONTROL_PLANE` to `true`
+   (`gh variable set SECUBOT_CONTROL_PLANE --body true`). Until then the hourly and daily
+   crons skip both jobs, so a central repository that doesn't use the control plane
+   doesn't fail every hour.
 
 The control plane never holds the Anthropic key, never checks out target code and can't
 write code. Its token can only start workflows that already exist in the target
