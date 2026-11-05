@@ -17,6 +17,9 @@ runs:
       with:
         version: "0.12.2"
         enable-cache: false
+        # The default mirror (releases.astral.sh) isn't on the harden-runner allowlists:
+        # each run waited on it, sometimes for minutes, before falling back to GitHub.
+        download-from-astral-mirror: false
     - name: Install secubot
       shell: bash
       env:

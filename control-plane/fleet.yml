@@ -7,11 +7,5 @@ slots: 24 # hourly control-plane cron + 24 slots = each repository once a day, s
 delay_seconds: 2
 report_artifact: "secubot*-report"
 repos:
-  - repo: YOUR_ORG/service-a
-  - repo: YOUR_ORG/service-b
-    ref: develop
-  - repo: YOUR_ORG/legacy-tool
-    inputs:
-      dry-run: "true" # onboarding: scan + triage + fix, publish nothing
-  - repo: YOUR_ORG/archived-thing
-    enabled: false
+  - repo: damhau/awxnext
+  - repo: damhau/rami
