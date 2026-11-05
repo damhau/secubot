@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -65,6 +66,23 @@ def enabled_tools(repo_root: Path, cfg: SecfixConfig) -> list[str]:
     if s.semgrep.enabled:
         tools.append("semgrep")
     return tools
+
+
+_FROM_STAGE = re.compile(r"^\s*FROM\s+(?:--\S+\s+)*\S+\s+AS\s+(\S+)", re.IGNORECASE)
+
+
+def stage_line(dockerfile: Path, target: str) -> int:
+    """1-based line of the `FROM ... AS <target>` instruction, else 1. Stage names are
+    case-insensitive, as in docker build."""
+    try:
+        lines = dockerfile.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return 1
+    for n, text in enumerate(lines, 1):
+        m = _FROM_STAGE.match(text)
+        if m and m.group(1).lower() == target.lower():
+            return n
+    return 1
 
 
 def _run(
@@ -187,11 +205,10 @@ def run_scanner(tool: str, repo_root: Path, out_dir: Path, cfg: SecfixConfig) ->
         elif tool == "trivy-image":
             ic = cfg.scanners.trivy_image
             image = "secubot-scan:local"
-            ok, detail = _run(
-                ["docker", "build", "-q", "-f", ic.dockerfile, "-t", image, ic.context],
-                repo_root,
-                timeout=3600,
-            )
+            build = ["docker", "build", "-q", "-f", ic.dockerfile, "-t", image]
+            if ic.target:
+                build.append(f"--target={ic.target}")
+            ok, detail = _run([*build, ic.context], repo_root, timeout=3600)
             if not ok:
                 return ScanStatus(tool, False, detail)
             ok, detail = _run(
@@ -214,7 +231,9 @@ def run_scanner(tool: str, repo_root: Path, out_dir: Path, cfg: SecfixConfig) ->
             if not ok:
                 return ScanStatus(tool, False, detail)
             doc = json.loads((tmp / "out.sarif").read_text())
-            # Image findings live in image layers; anchor them on the Dockerfile.
+            # Image findings live in image layers; anchor them on the Dockerfile (on the built
+            # stage's FROM line when a target is set).
+            line = stage_line(repo_root / ic.dockerfile, ic.target) if ic.target else 1
             for run in doc.get("runs", []):
                 for result in run.get("results", []):
                     for loc in result.get("locations", []) or []:
@@ -223,7 +242,7 @@ def run_scanner(tool: str, repo_root: Path, out_dir: Path, cfg: SecfixConfig) ->
                         )
                         art["uri"] = ic.dockerfile
                         art.pop("uriBaseId", None)
-                        loc["physicalLocation"]["region"] = {"startLine": 1}
+                        loc["physicalLocation"]["region"] = {"startLine": line}
                 run.pop("originalUriBaseIds", None)
             _write(doc, target)
         elif tool in {"govulncheck", "gosec"}:

@@ -26,6 +26,7 @@ scanners:
     enabled: false # build the Dockerfile and scan the image (needs docker egress)
     dockerfile: Dockerfile
     context: .
+    # target: runtime # stage to build and scan when the deployed one isn't the last
   govulncheck: true
   gosec: true
   bandit: true

@@ -44,7 +44,7 @@ With the monorepo `instance` input, artifact names become `secubot<instance>-…
 | Tool | When | Notes |
 |---|---|---|
 | trivy fs | always | dependencies, IaC misconfigurations, secrets. `--skip-version-check --disable-telemetry` |
-| trivy image | `scanners.trivy_image.enabled` | `docker build`, then scan the image; results anchored on the Dockerfile |
+| trivy image | `scanners.trivy_image.enabled` | `docker build` (the last stage, or `trivy_image.target`), then scan the image; results anchored on the Dockerfile (on the target stage's `FROM` line) |
 | govulncheck | `go.mod` found | per module; gives **reachability** (whether the vulnerable symbol is called) |
 | gosec | `go.mod` found | per module |
 | bandit | Python project found | |

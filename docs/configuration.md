@@ -19,6 +19,7 @@ jobs:
 | `dry-run` | `false` | scan, triage and fix, but push nothing and open no PRs, issues or suppressions |
 | `code-scanning` | `true` | upload each scanner's SARIF to Code Scanning (category `secubot/<tool>`). Needs GitHub Code Security on private repositories |
 | `egress-policy` | `block` | harden-runner policy. Use `audit` while onboarding |
+| `extra-allowed-endpoints` | `""` | More `host:port` entries, space-separated, for the scan and fix jobs, e.g. the registries `trivy_image` builds pull from (Docker Hub: `registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443`). The fix job runs the agent, so keep this to package and image registries |
 | `runs-on` | `ubuntu-24.04` | runner label. The agent sandbox setup assumes Ubuntu (apt, AppArmor sysctl) |
 | `go-version-file` | `go.mod` | used by `setup-go` when Go is detected |
 | `max-parallel-fixes` | `2` | concurrent fix jobs |
@@ -95,6 +96,7 @@ so.
 | `trivy` | `true` | trivy fs: dependencies, IaC, secrets |
 | `trivy_image.enabled` | `false` | `docker build` + image scan |
 | `trivy_image.dockerfile` / `.context` | `Dockerfile` / `.` | |
+| `trivy_image.target` | unset | `docker build --target`: the stage to scan, e.g. the one you deploy when it isn't the last. Unset builds the Dockerfile's last stage. Fix checks rebuild the same stage; findings are anchored on its `FROM` line |
 | `govulncheck` | `true` | Go: vulnerabilities with reachability |
 | `gosec` | `true` | Go: code |
 | `bandit` | `true` | Python: code |

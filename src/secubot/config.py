@@ -102,6 +102,9 @@ class TrivyImageConfig(_Strict):
     enabled: bool = False
     dockerfile: str = "Dockerfile"
     context: str = "."
+    target: str | None = Field(default=None, pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    """Stage to build (`docker build --target`), e.g. the one you deploy when it isn't the
+    Dockerfile's last stage. Unset builds the last stage. Fix checks rebuild the same stage."""
 
 
 class Scanners(_Strict):

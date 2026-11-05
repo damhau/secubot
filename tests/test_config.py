@@ -43,3 +43,12 @@ def test_load_and_detect(project):
     (project / ".secfix.yml").write_text("- not a mapping\n")
     with pytest.raises(ValueError):
         load_config(project)
+
+
+def test_trivy_image_target():
+    ok = SecfixConfig.model_validate({"scanners": {"trivy_image": {"target": "all-in-one"}}})
+    assert ok.scanners.trivy_image.target == "all-in-one"
+    assert SecfixConfig().scanners.trivy_image.target is None
+    for bad in ["--output=/tmp/x", "a b", "", "-q", "1stage"]:
+        with pytest.raises(ValidationError):
+            SecfixConfig.model_validate({"scanners": {"trivy_image": {"target": bad}}})

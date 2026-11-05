@@ -38,6 +38,12 @@ on:
         description: harden-runner egress policy, `audit` while onboarding, then `block`
         type: string
         default: block
+      extra-allowed-endpoints:
+        description: >
+          More host:port entries, space-separated, for the scan and fix jobs (the jobs that
+          build and test repository code), e.g. the registries a `docker build` pulls from
+        type: string
+        default: ""
       runs-on:
         type: string
         default: ubuntu-24.04
@@ -101,6 +107,7 @@ jobs:
             go.dev:443 dl.google.com:443
             mirror.gcr.io:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
             semgrep.dev:443
+            ${{ inputs.extra-allowed-endpoints }}
 
       - name: Checkout target
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -349,6 +356,7 @@ jobs:
             semgrep.dev:443
             registry.npmjs.org:443 registry.yarnpkg.com:443 repo.yarnpkg.com:443 nodejs.org:443
             azure.archive.ubuntu.com:80 archive.ubuntu.com:80 security.ubuntu.com:80
+            ${{ inputs.extra-allowed-endpoints }}
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

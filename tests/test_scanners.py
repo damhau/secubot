@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +16,7 @@ from secubot.scanners import (
     enabled_tools,
     run_scanner,
     scrubbed_env,
+    stage_line,
 )
 
 
@@ -115,3 +117,85 @@ def test_unreadable_paths_are_found(tmp_path):
         (tmp_path / ".claude").chmod(0o755)
     assert files == [".mcp.json"]
     assert dirs == [".claude"]
+
+
+DOCKERFILE = """# syntax=docker/dockerfile:1
+FROM golang:1.26 AS build
+RUN go build ./...
+
+from --platform=$BUILDPLATFORM python:3.12-slim As All-In-One
+COPY --from=build /app /app
+
+FROM gcr.io/distroless/static-debian12:nonroot
+"""
+
+
+def _image_sarif(path):
+    path.write_text(
+        json.dumps(
+            {
+                "version": "2.1.0",
+                "runs": [
+                    {
+                        "tool": {"driver": {"name": "Trivy", "rules": []}},
+                        "results": [
+                            {
+                                "ruleId": "CVE-2026-0001",
+                                "message": {"text": "openssl"},
+                                "locations": [
+                                    {
+                                        "physicalLocation": {
+                                            "artifactLocation": {"uri": "usr/lib/libssl.so"},
+                                            "region": {"startLine": 7},
+                                        }
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+
+
+def _fake_docker_and_trivy(calls):
+    def fake_run(cmd, cwd, timeout=1800, **kw):
+        calls.append(cmd)
+        if cmd[:2] == ["trivy", "image"]:
+            _image_sarif(Path(cmd[cmd.index("--output") + 1]))
+        return True, ""
+
+    return fake_run
+
+
+@pytest.mark.parametrize("target", [None, "all-in-one"])
+def test_trivy_image_build_target(project, tmp_path, monkeypatch, target):
+    (project / "Dockerfile").write_text(DOCKERFILE)
+    calls: list[list[str]] = []
+    monkeypatch.setattr("secubot.scanners._run", _fake_docker_and_trivy(calls))
+    image_cfg = {"enabled": True, **({"target": target} if target else {})}
+    cfg = SecfixConfig.model_validate({"scanners": {"trivy_image": image_cfg}})
+    status = run_scanner("trivy-image", project, tmp_path / "out", cfg)
+    assert status.ok, status.detail
+    build = calls[0]
+    assert build[:2] == ["docker", "build"]
+    assert build[-1] == "."  # the context stays last
+    if target:
+        assert "--target=all-in-one" in build
+    else:
+        assert not any(a.startswith("--target") for a in build)
+    doc = json.loads((tmp_path / "out" / "trivy-image.sarif").read_text())
+    loc = doc["runs"][0]["results"][0]["locations"][0]["physicalLocation"]
+    assert loc["artifactLocation"]["uri"] == "Dockerfile"
+    # with a target: the stage's FROM line; without: line 1, as before
+    assert loc["region"] == {"startLine": 5 if target else 1}
+
+
+def test_stage_line(tmp_path):
+    df = tmp_path / "Dockerfile"
+    df.write_text(DOCKERFILE)
+    assert stage_line(df, "build") == 2
+    assert stage_line(df, "all-in-one") == 5  # case-insensitive, --platform flag
+    assert stage_line(df, "missing") == 1
+    assert stage_line(tmp_path / "nope", "build") == 1
