@@ -175,6 +175,31 @@ def _cell(value: object) -> str:
     return str(value).replace("|", "\\|").replace("\n", " ")[:200]
 
 
+def _notes(e: dict) -> str:
+    """What went wrong in a repository's latest run, "" when nothing did."""
+    rep = e.get("report") or {}
+    notes = [e["error"]] if e.get("error") else []
+    failed = [t for t, s in (rep.get("tool_status") or {}).items() if s != "ok"]
+    if failed:
+        notes.append(f"scanner failed: {', '.join(failed)}")
+    triage = (rep.get("triage") or {}).values()
+    errors = sum(1 for t in triage if t.get("action") == "error")
+    if errors:
+        notes.append(f"triage failed: {errors} of {len(triage)}")
+    return "; ".join(notes)
+
+
+def unhealthy(entries: list[dict]) -> list[str]:
+    """Repositories whose latest run failed, or has something in the dashboard's notes."""
+    return sorted(
+        {
+            e["repository"]
+            for e in entries
+            if _notes(e) or e.get("conclusion", "success") != "success"
+        }
+    )
+
+
 def render_dashboard(entries: list[dict]) -> str:
     out = [
         "# secubot fleet",
@@ -191,14 +216,12 @@ def render_dashboard(entries: list[dict]) -> str:
         issues = sum(1 for a in actions if a.get("type") == "issue")
         cost = float(rep.get("cost_usd") or 0)
         total_cost += cost
-        failed = [t for t, s in (rep.get("tool_status") or {}).items() if s != "ok"]
-        notes = e.get("error") or (f"scanner failed: {', '.join(failed)}" if failed else "")
         last = f"[{e.get('conclusion', '?')}]({e['run_url']})" if e.get("run_url") else "-"
         out.append(
             f"| {_cell(e['repository'] + (' ' + e['instance'] if e.get('instance') else ''))} "
             f"| {last} | {sev.get('critical', '-')} | "
             f"{sev.get('high', '-')} | {sev.get('medium', '-')} | {prs} | {issues} | "
-            f"${cost:.2f} | {_cell(notes)} |"
+            f"${cost:.2f} | {_cell(_notes(e))} |"
         )
     out += ["", f"Total agent cost of the latest runs: ${total_cost:.2f}"]
     return "\n".join(out)

@@ -370,7 +370,8 @@ When you have many repositories, the control plane in the central repository
   then remove the `schedule:` trigger from the callers (keep `workflow_dispatch`).
 - **collects** the latest `secubot*-report` artifact from each repository into a dashboard
   artifact (`dashboard.md`, `fleet.json`). The dashboard shows severity counts, PRs and
-  issues opened, cost, and failed scanners.
+  issues opened, cost, failed scanners and triage errors. The daily job fails when a
+  repository's latest run failed or has one of those notes, so you get notified.
 
 Setup:
 
