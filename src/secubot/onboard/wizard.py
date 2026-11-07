@@ -536,6 +536,7 @@ def onboard(args, gh: GitHub, ask: Prompter, out=print, conf: OnboardSettings | 
     if url:
         out(f"  1. Review and merge {url}")
         out(f"  2. Start a dry run: gh workflow run secfix.yml -R {args.target}")
+        out("  3. Follow the rest of the steps in the pull request, including scheduling")
     else:
         out(f"  Start a run: gh workflow run secfix.yml -R {args.target}")
     return 0

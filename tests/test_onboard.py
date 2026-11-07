@@ -23,6 +23,7 @@ from secubot.onboard.render import (
     agent_singles,
     default_commands,
     dependabot_dirs,
+    pr_body,
     render_caller,
     render_dependabot,
     render_secfix,
@@ -80,6 +81,26 @@ def test_analyse_multi_stack(tmp_path):
     assert facts.primary("node").path == "web"
     assert facts.kinds == ["go", "python", "node"]
     assert not (facts.caller or facts.secfix_config or facts.dependabot_config)
+
+
+def test_commands_skip_a_browser_suite(tmp_path):
+    def project(test: str) -> str:
+        return json.dumps({"scripts": {"test": test}})
+
+    facts = analyse(
+        write(
+            tmp_path,
+            {
+                "e2e/package.json": project("playwright test"),
+                "e2e/package-lock.json": "{}",
+                "frontend/package.json": project("vitest run"),
+                "frontend/package-lock.json": "{}",
+            },
+        )
+    )
+    assert facts.primary("node").path == "frontend"
+    cmds = default_commands(facts)
+    assert cmds.test == "npm --prefix frontend test" and "e2e" not in cmds.setup
 
 
 def test_analyse_finds_existing_setup(tmp_path):
@@ -208,6 +229,17 @@ def test_render_caller():
     plain = yaml.safe_load(render_caller(repo="o/r", ref="v1"))["jobs"]["secfix"]
     assert set(plain["secrets"]) == {"ANTHROPIC_API_KEY"} and "code-scanning" not in plain["with"]
     assert schedule_for("o/r") == schedule_for("O/R") != schedule_for("o/other")
+
+
+def test_scheduling_points_at_the_control_plane(tmp_path):
+    caller = render_caller(repo="o/r", ref="v1", secubot_repo="me/secubot")
+    assert "control-plane/fleet.yml in me/secubot" in caller
+    assert list(yaml.safe_load(caller)[True]) == ["workflow_dispatch"]  # no schedule by default
+    facts = analyse(write(tmp_path, MULTI))
+    body = pr_body(
+        repo="o/r", facts=facts, files={}, cmds=default_commands(facts), secubot_repo="me/secubot"
+    )
+    assert "`control-plane/fleet.yml` in me/secubot" in body and "runs it twice" in body
 
 
 # -- the wizard, against a fake GitHub ------------------------------------------------------

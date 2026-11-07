@@ -198,11 +198,16 @@ Run it with **Actions → secfix → Run workflow** and check:
 3. The **fix jobs**: whether build/test work in CI. Set `commands.setup` if dependencies
    must be fetched first (e.g. `go mod download`, `uv sync --frozen`).
 4. The **harden-runner** insights for each job: any endpoint the repository legitimately
-   needs (a private module proxy, a package mirror). Add it in your fork of the workflow
-   or ask for an input, then switch back to `block`.
+   needs (a private module proxy, a package mirror). Add it with the caller's
+   `extra-allowed-endpoints` input (scan and fix jobs), then switch back to `block`.
 
 Then remove `dry-run` and `egress-policy`. Keep `policy.max_prs: 1` for the first weeks if
 you want a slow start.
+
+To run it every day, add the repository to `control-plane/fleet.yml` if you use the
+[control plane](#control-plane-optional), and do this after the caller is on the default
+branch, or its dispatch fails. Without a control plane, enable the caller's `schedule:`
+instead. Doing both runs it twice.
 
 ### `.secfix.yml`
 
@@ -370,7 +375,8 @@ When you have many repositories, the control plane in the central repository
   then remove the `schedule:` trigger from the callers (keep `workflow_dispatch`).
 - **collects** the latest `secubot*-report` artifact from each repository into a dashboard
   artifact (`dashboard.md`, `fleet.json`). The dashboard shows severity counts, PRs and
-  issues opened, cost, and failed scanners.
+  issues opened, cost, failed scanners and triage errors. The daily job fails when a
+  repository's latest run failed or has one of those notes, so you get notified.
 
 Setup:
 

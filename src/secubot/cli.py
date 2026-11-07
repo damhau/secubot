@@ -192,6 +192,16 @@ def cmd_triage(args) -> int:
         )
     else:
         print(json.dumps({"fix": to_fix}))
+    errors = [r for r in results if r.action == "error"]
+    if results and len(errors) == len(results):
+        # Nothing was triaged, so nothing gets fixed or published. A missing or rejected API
+        # key looks like this, and would otherwise be a green run that cost $0 and did nothing.
+        # With only some errors the job stays green: failing it would drop the good results.
+        print(
+            f"error: triage failed for all {len(results)} selected findings: {errors[0].error}",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
@@ -366,11 +376,12 @@ def cmd_fleet_dispatch(args) -> int:
     )
     for line in done:
         print(line)
-    return 0
+    # The other repositories were still dispatched; this makes the failed one visible.
+    return 1 if any(": FAILED: " in line for line in done) else 0
 
 
 def cmd_fleet_report(args) -> int:
-    from secubot.fleet import collect, load_fleet, render_dashboard
+    from secubot.fleet import collect, load_fleet, render_dashboard, unhealthy
 
     fleet = load_fleet(Path(args.fleet))
     entries = collect(fleet, Path(args.out))
@@ -383,6 +394,10 @@ def cmd_fleet_report(args) -> int:
             fh.write(md + "\n")
     else:
         print(md)
+    # Runs started by the dispatch App notify nobody, so this job's failure is the alert.
+    if bad := unhealthy(entries):
+        print(f"error: latest run needs attention: {', '.join(bad)}", file=sys.stderr)
+        return 1
     return 0
 
 

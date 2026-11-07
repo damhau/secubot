@@ -259,11 +259,13 @@ def render_caller(
     return "\n".join(
         [
             "# secubot caller, written by `secubot onboard`. It starts as a dry run with egress",
-            "# audit; then remove `dry-run`, then `egress-policy`, then enable the schedule.",
+            "# audit; then remove `dry-run`, then `egress-policy`. To run it every day, add this",
+            f"# repository to control-plane/fleet.yml in {secubot_repo}. Without a control plane,",
+            "# enable the schedule below instead. Doing both runs it twice.",
             "name: secfix",
             "on:",
             "  workflow_dispatch:",
-            f'  # schedule: [{{ cron: "{schedule_for(repo)}" }}] # once a real run looks right',
+            f'  # schedule: [{{ cron: "{schedule_for(repo)}" }}] # only without a control plane',
             "permissions: {}",
             "concurrency: { group: secfix, cancel-in-progress: false }",
             "jobs:",
@@ -316,7 +318,9 @@ def pr_body(
         f"1. Start a dry run: `gh workflow run secfix.yml -R {repo}`, and read its job summary.",
         "2. When the findings look right, remove `dry-run: true` and run it again. secubot then "
         "opens draft PRs and issues.",
-        "3. Once a real run passes, remove `egress-policy: audit` and enable the `schedule:` line.",
+        "3. Once a real run passes, remove `egress-policy: audit`.",
+        f"4. To run it every day, add `{repo}` to `control-plane/fleet.yml` in {secubot_repo}. "
+        "Without a control plane, enable the `schedule:` line instead. Doing both runs it twice.",
         "",
         f"See the [onboarding guide](https://github.com/{secubot_repo}/blob/main/docs/onboarding.md).",
     ]
