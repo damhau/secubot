@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -32,6 +33,8 @@ RENOVATE_FILES = (
     ".github/renovate.json5",
 )
 NPM_DEFAULT_TEST = 'echo "Error: no test specified" && exit 1'
+# Browser suites need a running app and browsers, so they can't verify a fix on a fresh runner.
+BROWSER_TESTS = re.compile(r"\b(playwright|cypress)\b")
 
 
 @dataclass
@@ -72,9 +75,11 @@ class RepoFacts:
     """Directory -> package manager, for each Node lock file (or lock-less project)."""
 
     def primary(self, kind: str) -> Project | None:
-        """The top-most project of a kind: the one the build/test commands target."""
+        """The project the build/test commands target: the top-most, then one with tests."""
         found = [p for p in self.projects if p.kind == kind]
-        return min(found, key=lambda p: (len(Path(p.path).parts), p.path)) if found else None
+        if not found:
+            return None
+        return min(found, key=lambda p: (len(Path(p.path).parts), not p.has_tests, p.path))
 
     @property
     def kinds(self) -> list[str]:
@@ -143,7 +148,7 @@ def _node_project(root: Path, d: Path) -> Project:
         "node",
         _rel(d, root),
         node_package_manager(d, root),
-        has_tests=bool(test) and test != NPM_DEFAULT_TEST,
+        has_tests=bool(test) and test != NPM_DEFAULT_TEST and not BROWSER_TESTS.search(test),
         typescript=(d / "tsconfig.json").is_file() or "typescript" in deps,
         scripts={str(k): str(v) for k, v in scripts.items()},
         locked=_lock_owner(root, d) is not None,
