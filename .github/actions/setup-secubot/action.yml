@@ -17,8 +17,8 @@ runs:
       with:
         version: "0.12.2"
         enable-cache: false
-        # The default mirror (releases.astral.sh) isn't on the harden-runner allowlists:
-        # each run waited on it, sometimes for minutes, before falling back to GitHub.
+        # The uv binary comes straight from GitHub Releases. setup-uv still reads its version
+        # manifest from releases.astral.sh, so that host is on the egress allowlists.
         download-from-astral-mirror: false
     - name: Install secubot
       shell: bash
