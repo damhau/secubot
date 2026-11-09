@@ -1,0 +1,60 @@
+# Managed by secubot (false positives agreed by triage + adversarial review).
+# Entries expire and are then re-triaged. Delete an entry to force re-triage now.
+suppressions:
+- id: 1261f271b501
+  reason: 'secubot triage: false positive (high confidence). The flagged code is reached
+    in production. `run_step` (src/secubot/fix.py:96-127) is called from `fix_cluster`
+    for `cfg.commands.setup` (fix.py:326-327) and from the verifier for `cfg.commands.build`
+    and `cfg.commands.test` (fix.py:176-179). This is not an exploitable command injection,
+    though. The `command` string is not built from attacker-controlled data such as
+    finding text, agent output or fi'
+  expires: '2026-12-09'
+  created: '2026-11-09'
+  source: triage
+- id: 1b098ea520a5
+  reason: 'secubot triage: false positive (high confidence). The finding is a Python
+    compatibility lint (semgrep python37-compatibility-importlib2), not a security
+    weakness. It has no CWE, and no attacker-controlled input is involved. It only
+    warns that `importlib.resources` does not exist before Python 3.7. The project
+    declares `requires-python = ">=3.12"` (pyproject.toml:6). On 3.12, `importlib.resources.files`
+    is part of the standard library and fully su'
+  expires: '2026-12-09'
+  created: '2026-11-09'
+  source: triage
+- id: 3a57f3a57518
+  reason: 'secubot triage: false positive (high confidence). The bidi characters at
+    src/secubot/render.py:21 are not a Trojan Source attack. They are the literal
+    endpoints of two ranges inside a regex character class: U+202A–U+202E (LRE/RLE/PDF/LRO/RLO)
+    and U+2066–U+2069 (LRI/RLI/FSI/PDI). The pattern is `_CONTROL`, a defensive sanitiser
+    that strips control and bidi-override characters from untrusted text.
+
+
+    I checked the exact contents of the line with an a'
+  expires: '2026-12-09'
+  created: '2026-11-09'
+  source: triage
+- id: 47bbab11884c
+  reason: 'secubot triage: false positive (high confidence). Bandit B602 flags `subprocess.run(command,
+    shell=True, ...)` in `run_step` (src/secubot/fix.py:99-108). The snippet the scanner
+    shows (`name=name,`) doesn''t match that line, but the flagged call is clearly
+    this one.
+
+
+    **Reachability:** Yes. `run_step` runs in the fix pipeline: the setup command
+    at fix.py:326-327 and the build/test commands through `make_verifier` at fix.py:176-179.
+
+
+    **Exploitabilit'
+  expires: '2026-12-09'
+  created: '2026-11-09'
+  source: triage
+- id: f751def3b78a
+  reason: 'secubot triage: false positive (high confidence). The U+202E (RIGHT-TO-LEFT
+    OVERRIDE) character on tests/test_render.py:12 sits inside a string literal. That
+    string is deliberately hostile input passed to `render.sanitize()` in the unit
+    test `test_sanitize_neutralises_markdown_tricks` (lines 9-19). The test then asserts
+    the sanitiser strips the character (line 19, which also contains a literal U+202E
+    inside a string). This is not a Trojan Source '
+  expires: '2026-12-09'
+  created: '2026-11-09'
+  source: triage
