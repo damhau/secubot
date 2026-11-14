@@ -151,6 +151,10 @@ class Policy(_Strict):
     auto_close: bool = True
     """Close secubot's open issues and PRs whose finding a run no longer reports (fixed by
     Dependabot or by hand, or now excluded). Only when every scanner succeeded."""
+    upstream_recheck_days: int = Field(default=30, ge=1, le=365)
+    """A dependency finding with no fixed release waits on the state branch instead of
+    becoming an issue. It is taken again as soon as a scanner reports a fixed version, or
+    after this many days."""
 
 
 class FixConfig(_Strict):
@@ -187,7 +191,8 @@ class Suppression(_Strict):
     reason: str = Field(min_length=10)
     expires: dt.date
     created: dt.date | None = None
-    source: Literal["config", "triage"] = "config"
+    source: Literal["config", "triage", "upstream"] = "config"
+    """`upstream`: a dependency waiting for a fixed release; it lapses once one exists."""
 
     @model_validator(mode="after")
     def _needs_selector(self) -> Suppression:

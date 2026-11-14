@@ -239,9 +239,12 @@ Publish is the only job with write access. It runs no model and no repository co
    issue references, no HTML, no links or images, no bidi controls, and fences cannot be
    closed early.
 5. Open issues for uncertain or failed clusters. Issues are deduplicated by the
-   `[secfix:<id>]` title tag.
-6. Commit new suppressions to `secfix-state` with git plumbing. Expired entries are
-   dropped, and nothing is written when nothing changed.
+   `[secfix:<id>]` title tag. A dependency cluster with no fixed version gets no issue
+   (nobody can act on it yet): it is recorded on `secfix-state` with `source: upstream`,
+   and select skips it until a scanner reports a fixed version or
+   `policy.upstream_recheck_days` pass. Suspected prompt injection still opens an issue.
+6. Commit new suppressions and upstream waits to `secfix-state` with git plumbing. Expired
+   entries are dropped, and nothing is written when nothing changed.
 7. Auto-close. Each candidate from select is checked again before anything is closed:
    - it must still be open
    - the hidden marker in its body (`<!-- secubot:cluster=… instance=… kind=… -->`) must

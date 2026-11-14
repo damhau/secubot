@@ -105,7 +105,7 @@ def test_dashboard():
             {"repository": "org/b", "error": "no completed run"},
         ]
     )
-    assert "| org/a | [success](https://x) | 1 | 2 | 0 | 1 | 1 | $4.20 |" in md
+    assert "| org/a | [success](https://x) | 1 | 2 | 0 | 1 | 1 | - | $4.20 |" in md
     assert "no completed run" in md and "$4.20" in md
 
 
@@ -214,3 +214,23 @@ def test_fleet_report_exit_code(tmp_path, monkeypatch, capsys, conclusion, expec
     assert main(["fleet-report", "--fleet", str(fleet), "--out", str(out)]) == expected
     assert (out / "dashboard.md").is_file() and (out / "fleet.json").is_file()
     assert ("org/a" in capsys.readouterr().err) is bool(expected)
+
+
+def test_waiting_upstream_counts_skipped_and_parked_findings():
+    from secubot.report import waiting_upstream
+    from secubot.state import Decision, Selection
+
+    selection = Selection(
+        selected=[],
+        decisions=[
+            Decision(cluster_id="a" * 12, selected=False, reason="r", group="upstream"),
+            Decision(cluster_id="b" * 12, selected=False, reason="r", group="severity"),
+        ],
+    )
+    actions = [{"type": "waiting", "cluster_id": "c" * 12}, {"type": "issue", "cluster_id": "d"}]
+    assert waiting_upstream(selection, actions) == 2
+    entry = {
+        "repository": "org/a",
+        "report": {"totals": {"by_severity": {}, "waiting_upstream": 2}, "actions": actions},
+    }
+    assert "| 0 | 1 | 2 | $0.00 |" in render_dashboard([entry])

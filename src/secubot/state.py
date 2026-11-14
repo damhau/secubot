@@ -4,7 +4,8 @@ State comes from four places, all fetched read-only by the scan job:
   * remote branches `secfix/<cluster id>`     -> work in flight (the idempotency key)
   * pull requests whose head is `secfix/...`  -> open = in flight, closed unmerged = rejected
   * issues titled `[secfix:<cluster id>] ...` -> open = waiting for a human
-  * `suppressions.yml` on the `secfix-state` branch (agreed false positives, with expiry)
+  * `suppressions.yml` on the `secfix-state` branch (agreed false positives, and dependencies
+    waiting for an upstream fix, each with an expiry)
 plus the human-curated `suppressions:` list in `.secfix.yml`.
 """
 
@@ -151,7 +152,8 @@ def parse_state_suppressions(text: str) -> list[Suppression]:
 def dump_state_suppressions(items: list[Suppression]) -> str:
     payload = {"suppressions": [s.model_dump(mode="json", exclude_none=True) for s in items]}
     header = (
-        "# Managed by secubot (false positives agreed by triage + adversarial review).\n"
+        "# Managed by secubot: false positives agreed by triage, and (source: upstream)\n"
+        "# dependencies waiting for a fixed release, which lapse once a fix is reported.\n"
         "# Entries expire and are then re-triaged. Delete an entry to force re-triage now.\n"
     )
     return header + yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
@@ -186,7 +188,8 @@ SKIP_GROUPS = {
     "in_flight": "Already in progress (secfix branch, open PR or issue)",
     "cooldown": "Closed recently, cooling down (`policy.cooldown_days`)",
     "suppressed": "Suppressed (`.secfix.yml`, `secfix-state`, or issue closed as not planned)",
-    "dependency": "Dependencies not taken (`policy.dependencies`, or no fixed version)",
+    "upstream": "Waiting for an upstream fix (no fixed release yet)",
+    "dependency": "Dependencies not taken (`policy.dependencies`)",
     "protected": "CI/agent config (GitHub Actions…): report only, see Code Scanning. "
     "Hide with `paths.ignore_protected`",
     "unreachable": "Not reachable (govulncheck)",
@@ -249,12 +252,20 @@ def _recent(when: dt.datetime | None, days: int, now: dt.datetime) -> bool:
     return now - when < dt.timedelta(days=days)
 
 
-def _dependency_reason(c: Cluster, mode: str) -> str | None:
-    """Return a skip reason, or None if the agent should take this dependency cluster."""
+def waits_for_upstream(c: Cluster) -> bool:
+    """A dependency finding no released version fixes: nothing for a human to act on yet."""
+    return c.kind == Kind.DEPENDENCY and not c.target_version
+
+
+def _dependency_reason(c: Cluster, mode: str) -> tuple[str, str] | None:
+    """Return a skip (group, reason), or None if the agent should take this dependency cluster."""
+    if mode == "none":
+        return "dependency", "dependency fixes disabled (policy.dependencies: none)"
+    if waits_for_upstream(c) and (c.key.endswith("|image") or c.package == "stdlib"):
+        # No code in the repository works around a vulnerable base image or Go toolchain.
+        return "upstream", "no fixed release of the base image or Go toolchain yet"
     if mode == "all":
         return None
-    if mode == "none":
-        return "dependency fixes disabled (policy.dependencies: none)"
     if c.key.endswith("|image"):
         return None  # base-image bumps are code changes in a Dockerfile; Renovate rarely helps
     if c.breaking_upgrade:
@@ -262,8 +273,8 @@ def _dependency_reason(c: Cluster, mode: str) -> str | None:
     if c.target_version is None and c.reachable == Reachability.YES:
         return None  # no fixed release but reachable: needs a code-level mitigation
     if c.target_version is None:
-        return "no fixed version known and not proven reachable"
-    return "non-breaking upgrade: left to Renovate/Dependabot (policy.dependencies)"
+        return "upstream", "no fixed version known and not proven reachable"
+    return "dependency", "non-breaking upgrade: left to Renovate/Dependabot (policy.dependencies)"
 
 
 def select(
@@ -276,8 +287,14 @@ def select(
     today = now.date()
     policy = cfg.policy
     all_suppressions = [*cfg.suppressions, *state.suppressions]
-    expired = [s for s in all_suppressions if not s.active(today)]
+    # A lapsed upstream wait is just a re-check, not something a human must renew.
+    expired = [s for s in all_suppressions if not s.active(today) and s.source != "upstream"]
     active = [s for s in all_suppressions if s.active(today)]
+
+    def applies(s: Suppression, c: Cluster) -> bool:
+        if s.source == "upstream" and not waits_for_upstream(c):
+            return False  # a fixed version exists now
+        return suppression_matches(s, c)
 
     pulls_by_head: dict[str, list[PullRef]] = {}
     for p in state.pulls:
@@ -307,9 +324,13 @@ def select(
         elif c.severity.rank < policy.min_severity.rank:
             group = "severity"
             reason = f"severity {c.severity.value} below policy.min_severity"
-        elif hit := next((s for s in active if suppression_matches(s, c)), None):
-            group = "suppressed"
-            reason = f"suppressed until {hit.expires} ({hit.source}): {hit.reason}"
+        elif hit := next((s for s in active if applies(s, c)), None):
+            if hit.source == "upstream":
+                group = "upstream"
+                reason = f"waiting for an upstream fix (re-checked {hit.expires}): {hit.reason}"
+            else:
+                group = "suppressed"
+                reason = f"suppressed until {hit.expires} ({hit.source}): {hit.reason}"
         elif dismissal := _dismissal(issues_by_id.get(c.id, []), policy.dismissed_ttl_days, today):
             group = "suppressed"
             reason = dismissal
@@ -339,9 +360,8 @@ def select(
         ):
             group = "unreachable"
             reason = "not reachable (govulncheck: vulnerable symbols are not called)"
-        elif c.kind == Kind.DEPENDENCY:
-            group = "dependency"
-            reason = _dependency_reason(c, policy.dependencies)
+        elif c.kind == Kind.DEPENDENCY and (skip := _dependency_reason(c, policy.dependencies)):
+            group, reason = skip
         if reason:
             decisions.append(Decision(cluster_id=c.id, selected=False, reason=reason, group=group))
         else:

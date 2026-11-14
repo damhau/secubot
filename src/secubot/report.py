@@ -15,6 +15,15 @@ from secubot.triage import TriageResult
 REPORT_SCHEMA = 1
 
 
+def waiting_upstream(selection: Selection | None, actions: list[dict]) -> int:
+    """Findings no released version fixes yet: skipped by selection, or parked by publish."""
+    skipped = (
+        {d.cluster_id for d in selection.decisions if d.group == "upstream"} if selection else set()
+    )
+    parked = {a.get("cluster_id") for a in actions if a.get("type") == "waiting"}
+    return len(skipped | parked)
+
+
 def fleet_entry(
     report: ScanReport,
     selection: Selection | None,
@@ -41,6 +50,7 @@ def fleet_entry(
             "clusters": len(report.clusters),
             "by_severity": severity_counts(report.clusters),
             "selected": len(selection.selected) if selection else 0,
+            "waiting_upstream": waiting_upstream(selection, actions),
         },
         "triage": {
             cid: {"action": t.action, "verdict": t.final_verdict, "cost_usd": t.cost_usd}

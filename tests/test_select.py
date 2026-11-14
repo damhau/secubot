@@ -3,10 +3,11 @@ from __future__ import annotations
 import datetime as dt
 import json
 
+import pytest
 from conftest import cluster_by
 
 from secubot.config import SecfixConfig, Suppression
-from secubot.models import Kind
+from secubot.models import Kind, Reachability, Severity
 from secubot.state import (
     IssueRef,
     PullRef,
@@ -261,3 +262,60 @@ def test_find_resolved_lists_open_items_whose_finding_is_gone(report):
     assert find_resolved(report.model_copy(update={"tool_status": {}}), state, True)[0] == []
     assert find_resolved(ok, state, False) == ([], "")
     assert select(ok, state, _cfg(auto_close=False), NOW).resolved == []
+
+
+def _without_fix(c, **kw):
+    c.target_version = None
+    c.breaking_upgrade = None
+    for k, v in kw.items():
+        setattr(c, k, v)
+    return c
+
+
+@pytest.mark.parametrize("image", [False, True])
+def test_no_fixed_toolchain_or_image_waits_without_triage(report, image):
+    c = _without_fix(
+        cluster_by(report, package="stdlib"),
+        severity=Severity.HIGH,
+        reachable=Reachability.YES,
+    )
+    if image:
+        c.package, c.key = "libsqlite3-0", "dependency|Dockerfile|image"
+    sel = select(report, RepoState(), _cfg(dependencies="all"), NOW)
+    decision = next(d for d in sel.decisions if d.cluster_id == c.id)
+    assert (decision.selected, decision.group) == (False, "upstream")
+
+
+def test_reachable_library_without_fix_is_still_taken_for_a_mitigation(report):
+    c = _without_fix(cluster_by(report, package="golang.org/x/text"), reachable=Reachability.YES)
+    assert c.id in select(report, RepoState(), _cfg(), NOW).selected
+    c.reachable = Reachability.UNKNOWN
+    sel = select(report, RepoState(), _cfg(), NOW)
+    assert next(d.group for d in sel.decisions if d.cluster_id == c.id) == "upstream"
+
+
+def test_upstream_wait_lapses_once_a_fixed_version_is_reported(report):
+    c = cluster_by(report, package="golang.org/x/text")
+    target, breaking = c.target_version, c.breaking_upgrade
+    wait = Suppression(
+        id=c.id,
+        reason="secubot: no released version fixes this yet",
+        expires=NOW.date() + dt.timedelta(days=30),
+        source="upstream",
+    )
+    _without_fix(c, reachable=Reachability.YES)
+    sel = select(report, RepoState(suppressions=[wait]), _cfg(), NOW)
+    decision = next(d for d in sel.decisions if d.cluster_id == c.id)
+    assert (decision.selected, decision.group) == (False, "upstream")
+    c.target_version, c.breaking_upgrade = target, breaking
+    assert c.id in select(report, RepoState(suppressions=[wait]), _cfg(), NOW).selected
+
+
+def test_a_lapsed_upstream_wait_is_not_reported_as_expired(report):
+    lapsed = Suppression(
+        id="0" * 12,
+        reason="secubot: no released version fixes this yet",
+        expires=NOW.date() - dt.timedelta(days=1),
+        source="upstream",
+    )
+    assert select(report, RepoState(suppressions=[lapsed]), _cfg(), NOW).expired_suppressions == []

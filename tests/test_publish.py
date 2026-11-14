@@ -361,3 +361,49 @@ def test_load_inputs_drops_resolved_items_that_are_still_reported(tmp_path, repo
     (tmp_path / "selection.json").write_text(sel.model_dump_json())
     inputs = load_inputs(tmp_path, None, None)
     assert [r.number for r in inputs.resolved] == [3]
+
+
+def _no_fix_dependency(report):
+    c = cluster_by(report, package="golang.org/x/text")
+    c.target_version, c.breaking_upgrade = None, None
+    return c
+
+
+def test_no_fixed_release_waits_on_the_state_branch_instead_of_an_issue(project, remote, report):
+    c = _no_fix_dependency(report)
+    blocked = FixResult(cluster_id=c.id, status="blocked", reason="no released version fixes this")
+    pub, runner = _publisher(project, report, {c.id: _triage(c)}, {c.id: blocked}, {})
+    actions = pub.run(TODAY)
+    assert [a["type"] for a in actions if a["cluster_id"] == c.id] == ["waiting"]
+    assert not [x for x in runner.gh_calls if x[1:3] == ["issue", "create"]]
+    content = subprocess.run(
+        ["git", "-C", str(remote), "show", f"{STATE_BRANCH}:suppressions.yml"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    [entry] = parse_state_suppressions(content)
+    assert (entry.id, entry.source) == (c.id, "upstream")
+    assert entry.expires == TODAY + dt.timedelta(days=30)
+
+
+def test_uncertain_triage_of_a_dependency_without_fix_waits(project, remote, report):
+    c = _no_fix_dependency(report)
+    pub, runner = _publisher(project, report, {c.id: _triage(c, action="issue")}, {}, {})
+    assert [a["type"] for a in pub.run(TODAY) if a["cluster_id"] == c.id] == ["waiting"]
+
+
+def test_suspected_injection_still_opens_an_issue(project, remote, report):
+    c = _no_fix_dependency(report)
+    t = _triage(c, action="issue")
+    t.analysis = Analysis.model_validate(analysis(injection_suspected=True))
+    pub, _ = _publisher(project, report, {c.id: t}, {}, {})
+    assert [a["type"] for a in pub.run(TODAY) if a["cluster_id"] == c.id] == ["issue"]
+
+
+def test_blocked_fix_with_a_fixed_version_still_opens_an_issue(project, remote, report):
+    c = cluster_by(report, package="golang.org/x/text")
+    assert c.target_version
+    blocked = FixResult(cluster_id=c.id, status="blocked", reason="tests fail on the new API")
+    pub, _ = _publisher(project, report, {c.id: _triage(c)}, {c.id: blocked}, {})
+    assert [a["type"] for a in pub.run(TODAY) if a["cluster_id"] == c.id] == ["issue"]

@@ -236,7 +236,7 @@ secubot is designed to run next to one of them. With the default
 |---|---|
 | Vulnerable dependency with a minor or patch fix | **Dependabot/Renovate.** secubot drops it before triage, so it costs nothing |
 | Vulnerable dependency whose fix is a major (or 0.x minor) upgrade | **secubot.** The agent also changes the code the upgrade breaks, and the fix is verified by build, test and rescan |
-| Vulnerable code that is reachable but has no fixed release | **secubot**, as a code-level mitigation or an issue |
+| Vulnerable code that is reachable but has no fixed release | **secubot**, as a code-level mitigation. Without one it waits, with no issue, until a fixed version is published |
 | Code, Dockerfile, IaC and secret findings | **secubot** |
 | Routine version updates, GitHub Actions, base images | **Dependabot/Renovate** |
 

@@ -204,13 +204,15 @@ def render_dashboard(entries: list[dict]) -> str:
     out = [
         "# secubot fleet",
         "",
-        "| Repository | Last run | Critical | High | Medium | PRs opened | Issues | Cost | Notes |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| Repository | Last run | Critical | High | Medium | PRs opened | Issues "
+        "| Waiting upstream | Cost | Notes |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     total_cost = 0.0
     for e in entries:
         rep = e.get("report") or {}
-        sev = (rep.get("totals") or {}).get("by_severity", {})
+        totals = rep.get("totals") or {}
+        sev = totals.get("by_severity", {})
         actions = rep.get("actions", [])
         prs = sum(1 for a in actions if a.get("type") == "pull_request")
         issues = sum(1 for a in actions if a.get("type") == "issue")
@@ -221,7 +223,7 @@ def render_dashboard(entries: list[dict]) -> str:
             f"| {_cell(e['repository'] + (' ' + e['instance'] if e.get('instance') else ''))} "
             f"| {last} | {sev.get('critical', '-')} | "
             f"{sev.get('high', '-')} | {sev.get('medium', '-')} | {prs} | {issues} | "
-            f"${cost:.2f} | {_cell(_notes(e))} |"
+            f"{totals.get('waiting_upstream', '-')} | ${cost:.2f} | {_cell(_notes(e))} |"
         )
     out += ["", f"Total agent cost of the latest runs: ${total_cost:.2f}"]
     return "\n".join(out)

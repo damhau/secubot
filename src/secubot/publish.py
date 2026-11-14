@@ -29,6 +29,7 @@ from secubot.state import (
     Selection,
     dump_state_suppressions,
     parse_state_suppressions,
+    waits_for_upstream,
 )
 from secubot.triage import TriageResult
 
@@ -36,8 +37,10 @@ LABEL_COLOR = "B60205"
 STATE_README = """# secubot state
 
 This orphan branch is written by the secubot publish job. `suppressions.yml` lists
-findings that triage and the adversarial review agreed are false positives. Every entry
-has a reason and an expiry date; expired entries are dropped and re-triaged.
+findings that triage and the adversarial review agreed are false positives, and (with
+`source: upstream`) dependency findings that no released version fixes yet: these lapse as
+soon as a scanner reports a fixed version. Every entry has a reason and an expiry date;
+expired entries are dropped and re-triaged.
 
 Delete an entry (or this branch) to force re-triage. Permanent suppressions belong in
 `.secfix.yml` on the default branch, where they are code-reviewed.
@@ -97,6 +100,7 @@ class Inputs:
 
 
 CLUSTER_ID_RE = re.compile(r"[0-9a-f]{12}")
+BLOCKED = {"failed", "blocked"}
 
 
 def load_inputs(scan_dir: Path, triage_dir: Path | None, fix_dir: Path | None) -> Inputs:
@@ -442,7 +446,8 @@ class Publisher:
                 "commit-tree",
                 tree,
                 "-m",
-                f"secubot: {len(new)} new suppression(s), {len(items)} active",
+                f"secubot: {len(new)} new entr{'y' if len(new) == 1 else 'ies'}, "
+                f"{len(items)} active",
             ]
             if parent:
                 commit_args += ["-p", parent]
@@ -457,6 +462,36 @@ class Publisher:
                 raise PublishError(f"could not update {STATE_BRANCH}: {pushed.stderr[-300:]}")
 
     # -- orchestration --------------------------------------------------------------------
+
+    def _upstream_wait(self, cluster_id: str) -> str | None:
+        """Why a finding that would become an issue waits for an upstream fix instead."""
+        if not waits_for_upstream(self.inputs.report.cluster(cluster_id)):
+            return None
+        fix = self.inputs.fixes.get(cluster_id)
+        if fix is not None:
+            return f"automatic fix {fix.status}: {fix.reason}" if fix.status in BLOCKED else None
+        t = self.inputs.triage.get(cluster_id)
+        if t is None or t.action != "issue":
+            return None
+        if any(p is not None and p.injection_suspected for p in (t.analysis, t.challenge)):
+            return None  # suspicious repository content is a human's business either way
+        return t.reason
+
+    def _waiting(self, today: dt.date) -> dict[str, Suppression]:
+        out: dict[str, Suppression] = {}
+        for cid in {*self.inputs.fixes, *self.inputs.triage}:
+            why = self._upstream_wait(cid)
+            if why is None:
+                continue
+            out[cid] = Suppression(
+                id=cid,
+                reason=f"secubot: no released version fixes this yet. {why}"[:500],
+                expires=today + dt.timedelta(days=self.cfg.policy.upstream_recheck_days),
+                created=today,
+                source="upstream",
+            )
+            self._record("waiting", cid, detail=why[:300])
+        return out
 
     def run(self, today: dt.date | None = None) -> list[dict]:
         today = today or dt.date.today()
@@ -474,7 +509,8 @@ class Publisher:
         for t in inputs.triage.values():
             if t.action == "suppress":
                 self._record("suppressed", t.cluster_id, detail=t.reason)
-        self.update_state(suppressions, today)
+        waiting = self._waiting(today)
+        self.update_state([*suppressions, *waiting.values()], today)
 
         prs = 0
         for cid, fix in inputs.fixes.items():
@@ -485,8 +521,9 @@ class Publisher:
                         continue
                     self.open_pr(cid)
                     prs += 1
-                elif fix.status in {"failed", "blocked"}:
-                    self.open_issue(cid, f"automatic fix {fix.status}: {fix.reason}", fix=fix)
+                elif fix.status in BLOCKED:
+                    if cid not in waiting:
+                        self.open_issue(cid, f"automatic fix {fix.status}: {fix.reason}", fix=fix)
                 else:
                     self._record("retry", cid, detail=f"fix error, retried next run: {fix.reason}")
             except (PublishError, KeyError) as exc:
@@ -495,7 +532,8 @@ class Publisher:
         for cid, t in inputs.triage.items():
             try:
                 if t.action == "issue":
-                    self.open_issue(cid, t.reason)
+                    if cid not in waiting:
+                        self.open_issue(cid, t.reason)
                 elif t.action == "error":
                     self._record("retry", cid, detail=f"triage error, retried next run: {t.error}")
                 elif t.action == "fix" and cid in inputs.rejected:

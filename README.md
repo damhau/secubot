@@ -31,7 +31,8 @@ flowchart LR
 
 Simple dependency bumps are left to Renovate/Dependabot by default. secubot only takes on
 upgrades that break something (a major or 0.x minor bump), or vulnerable code that is
-reachable and has no fixed version.
+reachable and has no fixed version. A finding that no release fixes yet and that has no
+code-level mitigation opens nothing: it waits until a fixed version is published.
 
 ## Enable secubot on a repository
 

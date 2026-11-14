@@ -123,6 +123,7 @@ Go scanners run only when Go is detected, Python scanners only when Python is.
 | `suppression_ttl_days` | `30` | lifetime of automatic suppressions |
 | `cooldown_days` | `90` | after a secubot PR is closed unmerged, or its issue is closed, leave the cluster alone this long |
 | `auto_close` | `true` | close secubot's open issues and PRs whose finding a run no longer reports (fixed by a Dependabot PR or by hand, or now excluded), with a comment. Only when every scanner succeeded. A PR's `secfix/<id>` branch is deleted too. Issues for hard-coded secrets are never closed automatically |
+| `upstream_recheck_days` | `30` | a dependency finding no released version fixes (no fixed version, and the fix agent found no code-level mitigation, or triage could not settle it) opens no issue. It waits on `secfix-state` (`source: upstream`) and is taken again as soon as a scanner reports a fixed version, or after this many days. Go toolchain (`stdlib`) and base-image findings with no fixed release are not triaged at all. The run summary and the fleet dashboard count them as *waiting upstream* |
 | `dismissed_ttl_days` | `180` | closing a secubot issue as **Not planned** (false positive, accepted risk) suppresses the finding this long, counted from the close date. The latest comment by a maintainer is recorded as the reason. Reopen the issue to undo it |
 
 ### `fix`

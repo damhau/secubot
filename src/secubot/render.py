@@ -384,6 +384,8 @@ def _outcome(
     if "issue" in by_type:
         why = _issue_why(c, t, fix)
         return link("issue", "issue") + (f": {why}" if why else "")
+    if "waiting" in by_type:
+        return "waiting for an upstream fix (no issue)" + (" (dry run)" if dry_run else "")
     if "suppressed" in by_type:
         return "suppressed" + (" (dry run)" if dry_run else "")
     if "deferred" in by_type:
@@ -493,6 +495,7 @@ def summary_markdown(
         "pull_request": 0,
         "issue": 0,
         "suppressed": 0,
+        "waiting": 0,
         "closed": 0,
         "deferred": 0,
         "error": 0,
@@ -505,6 +508,7 @@ def summary_markdown(
         "pull_request": "draft PR",
         "issue": "issue",
         "suppressed": "suppressed",
+        "waiting": "waiting for an upstream fix",
         "closed": "closed (no longer reported)",
         "deferred": "deferred",
         "error": "error",
@@ -611,7 +615,7 @@ def summary_markdown(
     notes = []
     for a in by_cluster.get("-", []):
         if a.get("type") == "state":
-            notes.append(f"Suppressions on `secfix-state`: {short(a.get('detail'), 80)}.")
+            notes.append(f"Entries on `secfix-state`: {short(a.get('detail'), 80)}.")
         elif a.get("type") == "ignored":
             notes.append(f"Publish ignored an artifact: {short(a.get('detail'), 150)}.")
         else:
