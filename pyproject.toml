@@ -1,6 +1,6 @@
 [project]
 name = "secubot"
-version = "1.2.0"
+version = "1.2.1"
 description = "Scheduled security pipeline: deterministic scanners -> dedup -> Claude triage (with adversarial verification) -> Claude fix -> draft PR."
 readme = "README.md"
 requires-python = ">=3.12"
