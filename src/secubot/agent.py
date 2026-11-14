@@ -17,6 +17,7 @@ between phases:
 from __future__ import annotations
 
 import json
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -43,6 +44,70 @@ AGENT_ENV = {
     "DISABLE_ERROR_REPORTING": "1",
     "CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1",
 }
+
+# With CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, Claude Code creates empty files at the root of its cwd
+# (package.json, lock files, .npmrc, .env*, ...) so its sandbox can mount them read-only, and
+# never removes them. esbuild, Vite and vitest parse every package.json above the file they
+# load and abort on an empty one, so the agent's sandboxed commands get valid content instead.
+STUB_SEEDS = {"package.json": "{}\n"}
+
+
+class ScrubStubs:
+    """Keeps what a Claude Code session adds at the repository root out of secubot's checks."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        self._before = {p.name for p in root.iterdir()}
+        self._seeded: set[str] = set()
+
+    def seed(self) -> None:
+        """Before a turn: replace the stubs that would break the agent's own commands."""
+        for name, content in STUB_SEEDS.items():
+            path = self.root / name
+            if name not in self._before and _missing_or_empty_file(path):
+                path.write_text(content, encoding="utf-8")
+                self._seeded.add(name)
+
+    def clear(self) -> None:
+        """After a turn: remove the root entries the session added that are empty or a seed."""
+        for path in list(self.root.iterdir()):
+            if path.name in self._before:
+                continue
+            try:
+                if path.name in self._seeded and path.is_file() and not path.is_symlink():
+                    path.unlink()
+                elif _is_empty_tree(path):
+                    _remove_tree(path)
+            except OSError:
+                # A background command the agent left running may still be writing here.
+                continue
+        self._seeded.clear()
+
+
+def _missing_or_empty_file(path: Path) -> bool:
+    try:
+        st = path.lstat()
+    except FileNotFoundError:
+        return True
+    return stat.S_ISREG(st.st_mode) and st.st_size == 0
+
+
+def _is_empty_tree(path: Path) -> bool:
+    st = path.lstat()
+    if stat.S_ISREG(st.st_mode):
+        return st.st_size == 0
+    if stat.S_ISDIR(st.st_mode):
+        return all(_is_empty_tree(child) for child in path.iterdir())
+    return False
+
+
+def _remove_tree(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        for child in path.iterdir():
+            _remove_tree(child)
+        path.rmdir()
+    else:
+        path.unlink()
 
 
 @dataclass

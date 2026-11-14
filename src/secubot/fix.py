@@ -22,7 +22,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from secubot import prompts
-from secubot.agent import AgentFactory, SessionSpec
+from secubot.agent import AgentFactory, ScrubStubs, SessionSpec
 from secubot.config import SecfixConfig, node_package_manager
 from secubot.gate import Gate, GatePolicy
 from secubot.models import Cluster, Kind, ScanReport
@@ -355,12 +355,15 @@ async def fix_cluster(
         effort=cfg.models.effort,
         extra_env=extra_env,
     )
+    stubs = ScrubStubs(repo_root)
     session = factory(spec)
     prompt = _fix_prompt(cluster, triage, cfg, cmds)
     diff = ""
     try:
         for number in range(1, cfg.fix.max_attempts + 1):
+            stubs.seed()
             turn = await session.turn(prompt)
+            stubs.clear()
             result.cost_usd += turn.cost_usd
             if turn.is_error:
                 result.status, result.reason = "error", f"agent session failed: {turn.error}"
@@ -388,6 +391,7 @@ async def fix_cluster(
             result.reason = f"not verified after {cfg.fix.max_attempts} attempts"
     finally:
         await session.close()
+        stubs.clear()
 
     result.tool_calls = gate.log[-200:]
     result.denied_tool_calls = sum(1 for e in gate.log if not e["allowed"])

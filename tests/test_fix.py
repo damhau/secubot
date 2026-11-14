@@ -76,6 +76,32 @@ def test_fix_verified_first_attempt(report, project, tmp_path):
     assert factory.closed == 1
 
 
+def test_scrub_stubs_stay_out_of_verification(report, project, tmp_path):
+    cluster = cluster_by(report, path="goapp/main.go", line=19)
+    cfg = SecfixConfig.model_validate(CFG)
+    before = sorted(p.name for p in project.iterdir())
+    seen = {}
+    edit = _edit("goapp/main.go", *FIX_LINE)
+
+    def turn(spec, prompt):
+        for name in ("package.json", "package-lock.json", ".env"):
+            (spec.cwd / name).open("a").close()
+        seen["package.json"] = (spec.cwd / "package.json").read_text()
+        return edit(spec, prompt)
+
+    def verifier(c, attempt):
+        seen["verified"] = sorted(p.name for p in project.iterdir())
+        return [StepResult(name="test", command="go test ./...", ok=True)], []
+
+    factory = FakeFactory([[turn]])
+    r = asyncio.run(
+        fix_cluster(cluster, _triage(cluster), cfg, project, tmp_path / "o", factory, verifier)
+    )
+    assert r.status == "fixed"
+    assert seen == {"package.json": "{}\n", "verified": before}
+    assert sorted(p.name for p in project.iterdir()) == before
+
+
 def test_fix_retries_with_feedback(report, project, tmp_path):
     cluster = cluster_by(report, path="goapp/main.go", line=19)
     cfg = SecfixConfig.model_validate(CFG)

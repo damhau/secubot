@@ -76,7 +76,7 @@ rights.
 | `--restricted` | file tools confined to the working directory; refuses `bypassPermissions`; settings, git and tool-config writes need the permission handler |
 | `setting_sources=[]`, `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` | the repository's `.claude/`, `CLAUDE.md`, hooks and settings are **not loaded**, so a repository can't reconfigure its own reviewer |
 | `strict_mcp_config` + `mcp_servers={}` | no MCP servers, including a repository's `.mcp.json` |
-| `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` (+ bubblewrap, socat) | commands the agent runs don't inherit the API key or cloud credentials; the setup action installs `bwrap` and `socat`. Without them every agent command fails closed |
+| `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` (+ bubblewrap, socat) | commands the agent runs don't inherit the API key or cloud credentials; the setup action installs `bwrap` and `socat`. Without them every agent command fails closed. Claude Code also creates empty `package.json`, lock files, `.npmrc` and `.env*` at the repository root so the sandbox can mount them read-only. secubot removes them before its own build, test and rescan, and gives the agent a `{}` `package.json`, because esbuild, Vite and vitest abort on an empty one in a parent directory |
 | PreToolUse **gate** (`gate.py`) | deny-by-default re-check of every call: paths must be inside the repository and outside `.git/`, no edits to protected paths, Bash must match the allowlist exactly (`prefix:*` entries refuse shell metacharacters). Every decision is logged; denials are counted in the PR footer |
 | `max_turns`, `max_budget_usd`, job `timeout-minutes` | bound cost and runtime per session |
 | Telemetry, error reporting, auto-update off | no traffic besides the API |
