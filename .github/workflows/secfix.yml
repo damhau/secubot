@@ -94,7 +94,7 @@ jobs:
       sha: ${{ steps.meta.outputs.sha }}
       ref_name: ${{ steps.meta.outputs.ref_name }}
     steps:
-      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: >
@@ -201,7 +201,7 @@ jobs:
       - name: Upload SARIF (trivy-fs)
         if: inputs.code-scanning && hashFiles('scan/sarif/trivy-fs.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: scan/sarif/trivy-fs.sarif
           category: secubot/trivy-fs
@@ -209,7 +209,7 @@ jobs:
       - name: Upload SARIF (trivy-image)
         if: inputs.code-scanning && hashFiles('scan/sarif/trivy-image.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: scan/sarif/trivy-image.sarif
           category: secubot/trivy-image
@@ -217,7 +217,7 @@ jobs:
       - name: Upload SARIF (govulncheck)
         if: inputs.code-scanning && hashFiles('scan/sarif/govulncheck.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: scan/sarif/govulncheck.sarif
           category: secubot/govulncheck
@@ -225,7 +225,7 @@ jobs:
       - name: Upload SARIF (gosec)
         if: inputs.code-scanning && hashFiles('scan/sarif/gosec.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: scan/sarif/gosec.sarif
           category: secubot/gosec
@@ -233,7 +233,7 @@ jobs:
       - name: Upload SARIF (bandit)
         if: inputs.code-scanning && hashFiles('scan/sarif/bandit.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: scan/sarif/bandit.sarif
           category: secubot/bandit
@@ -241,7 +241,7 @@ jobs:
       - name: Upload SARIF (pip-audit)
         if: inputs.code-scanning && hashFiles('scan/sarif/pip-audit.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: scan/sarif/pip-audit.sarif
           category: secubot/pip-audit
@@ -249,7 +249,7 @@ jobs:
       - name: Upload SARIF (semgrep)
         if: inputs.code-scanning && hashFiles('scan/sarif/semgrep.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@8498dc4c2b27cdd99baf0f87955b29ebbf30c78d # v4.39.1
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: scan/sarif/semgrep.sarif
           category: secubot/semgrep
@@ -280,7 +280,7 @@ jobs:
       has_fixes: ${{ steps.triage.outputs.has_fixes }}
       has_publish: ${{ steps.triage.outputs.has_publish }}
     steps:
-      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: >
@@ -341,7 +341,7 @@ jobs:
       matrix:
         cluster: ${{ fromJSON(needs.triage.outputs.fix_matrix) }}
     steps:
-      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: >
@@ -453,7 +453,7 @@ jobs:
     env:
       HAS_APP: ${{ secrets.SECUBOT_APP_ID != '' }}
     steps:
-      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: >
@@ -553,7 +553,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: >
