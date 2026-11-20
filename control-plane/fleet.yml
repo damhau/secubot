@@ -9,3 +9,4 @@ report_artifact: "secubot*-report"
 repos:
   - repo: damhau/awxnext
   - repo: damhau/rami
+  - repo: damhau/kubevmui
