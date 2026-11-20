@@ -519,6 +519,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--build", help="build command (default: detected)")
     sp.add_argument("--test", help="test command (default: detected)")
     sp.add_argument("--skip", help="extra paths to skip, comma-separated")
+    sp.add_argument("--max-prs", type=int, help="draft PRs per run (default: 3)")
     sp.add_argument("--branch", help="branch for the PR (default: secubot/onboarding)")
     sp.add_argument("--secubot-repo", help="central repository (default: damhau/secubot)")
     sp.add_argument("--ref", help="ref of the reusable workflow (default: the major, v1)")

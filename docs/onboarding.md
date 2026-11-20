@@ -57,12 +57,15 @@ uv run --extra onboard secubot onboard OWNER/REPO --dry-run   # show everything,
    needs the `workflow` scope (`gh auth refresh -s workflow`).
 2. **Clones** the default branch into a temporary folder (deleted afterwards) and detects:
    - Go modules, Python projects (uv, poetry or pip) and Node projects (npm, pnpm, yarn or
-     bun; TypeScript included), with their tests
+     bun; TypeScript included), with their tests. A `pyproject.toml` or `setup.cfg` that
+     only configures tools (ruff, semantic-release, flake8) isn't a project.
    - Dockerfiles
    - an existing caller workflow, `.secfix.yml`, Dependabot or Renovate configuration
 3. **Asks**, with the detected value as the default:
    - the setup, build and test commands
    - paths to skip
+   - how many draft PRs a run may open (`policy.max_prs`, default 3; `--max-prs`). Fixes
+     over the limit wait for the next run.
    - whether to add `.github/dependabot.yml` and turn on Dependabot alerts and security
      updates
    - whether to use a GitHub App
@@ -115,6 +118,7 @@ Answers that are the same for every repository go in `~/.config/secubot/config.t
 # ref = "v1"                        # default: the current major
 # branch = "secubot/onboarding"
 # dependabot = true                 # false: like --no-dependabot
+# max_prs = 3                       # draft PRs per run, like --max-prs
 
 # Where the secrets come from. The file never holds them: a path, or a command that
 # prints the value (run without a shell; its output is never shown).

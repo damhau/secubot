@@ -9,8 +9,12 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
 
 from secubot.config import (
     NODE_LOCKFILES,
@@ -19,6 +23,7 @@ from secubot.config import (
     node_package_manager,
     node_projects,
     python_projects,
+    read_pyproject,
 )
 
 CALLER_MARKER = "/.github/workflows/secfix.yml@"
@@ -35,6 +40,8 @@ RENOVATE_FILES = (
 NPM_DEFAULT_TEST = 'echo "Error: no test specified" && exit 1'
 # Browser suites need a running app and browsers, so they can't verify a fix on a fresh runner.
 BROWSER_TESTS = re.compile(r"\b(playwright|cypress)\b")
+# Group and extra names end up in a shell command (PEP 685 names are narrower still).
+SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 @dataclass
@@ -53,6 +60,8 @@ class Project:
     """Node only: a lock file exists here or in a parent (else a frozen install fails)."""
     requirements: str = ""
     """pip only: the requirements file to install, "" when the project installs itself."""
+    sync_args: str = ""
+    """uv only: what `uv sync` needs to install pytest, e.g. "--extra dev"."""
 
     @property
     def label(self) -> str:
@@ -91,22 +100,59 @@ def _rel(path: Path, root: Path) -> str:
     return "" if rel == "." else rel
 
 
-def _walk(root: Path, cfg: SecfixConfig):
+def _walk(root: Path, cfg: SecfixConfig, stop: Collection[Path] = ()):
+    """Every directory under `root`, except skipped ones and those in `stop`."""
     skip = cfg.skip_spec()
     for dirpath, dirnames, filenames in os.walk(root):
         rel_dir = _rel(Path(dirpath), root)
         prefix = f"{rel_dir}/" if rel_dir else ""
         dirnames[:] = sorted(
-            d for d in dirnames if d != ".git" and not skip.match_file(f"{prefix}{d}/")
+            d
+            for d in dirnames
+            if d != ".git"
+            and not skip.match_file(f"{prefix}{d}/")
+            and Path(dirpath) / d not in stop
         )
         yield Path(dirpath), prefix, filenames
 
 
-def _has_files(root: Path, cfg: SecfixConfig, match) -> bool:
-    return any(any(match(name) for name in names) for _, _, names in _walk(root, cfg))
+def _has_files(root: Path, cfg: SecfixConfig, match, stop: Collection[Path] = ()) -> bool:
+    return any(any(match(name) for name in names) for _, _, names in _walk(root, cfg, stop))
 
 
-def _python_project(root: Path, d: Path, cfg: SecfixConfig) -> Project:
+def _requirement_name(spec: object) -> str:
+    if not isinstance(spec, str):
+        return ""  # e.g. {include-group = "..."}
+    try:
+        return canonicalize_name(Requirement(spec).name)
+    except InvalidRequirement:
+        return ""
+
+
+def _uv_sync_args(pyproject: dict) -> str:
+    """`uv sync` installs the dependencies and the `dev` group: pytest anywhere else needs
+    `--group` or `--extra`."""
+
+    def table(parent: dict, key: str) -> dict:
+        value = parent.get(key)
+        return value if isinstance(value, dict) else {}
+
+    def has_pytest(specs: object) -> bool:
+        return isinstance(specs, list) and any(_requirement_name(s) == "pytest" for s in specs)
+
+    project, groups = table(pyproject, "project"), table(pyproject, "dependency-groups")
+    uv = table(table(pyproject, "tool"), "uv")
+    installed = (project.get("dependencies"), groups.get("dev"), uv.get("dev-dependencies"))
+    if any(has_pytest(specs) for specs in installed):
+        return ""
+    for flag, named in (("--group", groups), ("--extra", table(project, "optional-dependencies"))):
+        for name, specs in named.items():
+            if has_pytest(specs) and SAFE_NAME.match(str(name)):
+                return f"{flag} {name}"
+    return ""
+
+
+def _python_project(root: Path, d: Path, cfg: SecfixConfig, nested: Collection[Path]) -> Project:
     if (d / "uv.lock").is_file():
         manager = "uv"
     elif (d / "poetry.lock").is_file():
@@ -117,19 +163,23 @@ def _python_project(root: Path, d: Path, cfg: SecfixConfig) -> Project:
     if manager == "pip" and not ((d / "pyproject.toml").is_file() or (d / "setup.py").is_file()):
         reqs = sorted(p.name for p in d.glob("requirements*.txt"))
         requirements = "requirements.txt" if "requirements.txt" in reqs else (reqs or [""])[0]
-    pyproject = (
-        (d / "pyproject.toml").read_text(encoding="utf-8", errors="replace")
-        if (d / "pyproject.toml").is_file()
-        else ""
-    )
+    pyproject = read_pyproject(d) or {}
+    tool = pyproject.get("tool") if isinstance(pyproject.get("tool"), dict) else {}
     has_tests = (
         (d / "tests").is_dir()
         or (d / "test").is_dir()
         or (d / "conftest.py").is_file()
-        or "[tool.pytest" in pyproject
-        or _has_files(d, cfg, lambda n: n.startswith("test_") and n.endswith(".py"))
+        or "pytest" in tool
+        or _has_files(d, cfg, lambda n: n.startswith("test_") and n.endswith(".py"), nested)
     )
-    return Project("python", _rel(d, root), manager, has_tests=has_tests, requirements=requirements)
+    return Project(
+        "python",
+        _rel(d, root),
+        manager,
+        has_tests=has_tests,
+        requirements=requirements,
+        sync_args=_uv_sync_args(pyproject) if manager == "uv" and has_tests else "",
+    )
 
 
 def _node_project(root: Path, d: Path) -> Project:
@@ -189,7 +239,8 @@ def analyse(root: Path) -> RepoFacts:
     for d in go_modules(root, cfg):
         has_tests = _has_files(d, cfg, lambda n: n.endswith("_test.go"))
         projects.append(Project("go", _rel(d, root), "go", has_tests=has_tests))
-    projects += [_python_project(root, d, cfg) for d in python_projects(root, cfg)]
+    python_dirs = frozenset(python_projects(root, cfg))
+    projects += [_python_project(root, d, cfg, python_dirs) for d in sorted(python_dirs)]
     projects += [_node_project(root, d) for d in node_projects(root, cfg)]
 
     docker_dirs = sorted(

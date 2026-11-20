@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 import yaml
 
-from secubot.config import DEFAULT_SKIP_PATHS, SecfixConfig
+from secubot.config import DEFAULT_SKIP_PATHS, Policy, SecfixConfig
 from secubot.gate import SHELL_METACHARS
 from secubot.onboard.analyse import Project, RepoFacts
 
@@ -15,6 +15,7 @@ DEFAULT_SECUBOT_REPO = "damhau/secubot"
 CALLER_PATH = ".github/workflows/secfix.yml"
 SECFIX_PATH = ".secfix.yml"
 DEPENDABOT_PATH = ".github/dependabot.yml"
+DEFAULT_MAX_PRS = Policy.model_fields["max_prs"].default
 
 
 class _Dumper(yaml.SafeDumper):
@@ -62,7 +63,8 @@ def project_commands(p: Project) -> tuple[str | None, str | None, str | None]:
     if p.kind == "python":
         if p.manager == "uv":
             uv = f"uv --directory {p.path}" if p.path else "uv"
-            return f"{uv} sync --frozen", None, f"{uv} run pytest -q" if p.has_tests else None
+            sync = f"{uv} sync --frozen" + (f" {p.sync_args}" if p.sync_args else "")
+            return sync, None, f"{uv} run pytest -q" if p.has_tests else None
         if p.manager == "poetry":
             poetry = f"uvx poetry --directory {p.path}" if p.path else "uvx poetry"
             test = f"{poetry} run pytest -q" if p.has_tests else None
@@ -118,7 +120,7 @@ def render_secfix(
     *,
     extra_skip: list[str] | None = None,
     dependencies_all: bool = False,
-    max_prs: int = 1,
+    max_prs: int = DEFAULT_MAX_PRS,
 ) -> str:
     data: dict = {"version": 1}
     commands = {
@@ -139,8 +141,7 @@ def render_secfix(
     header = (
         "# secubot configuration, written by `secubot onboard`. All options:\n"
         f"# https://github.com/{DEFAULT_SECUBOT_REPO}/blob/main/docs/configuration.md\n"
-        "# Fixes are verified by `commands` (and a rescan). `max_prs` starts low: raise it once\n"
-        "# the first PRs look right.\n"
+        "# Fixes are verified by `commands` (and a rescan). `max_prs` caps the draft PRs per run.\n"
     )
     if dependencies_all:
         header += (

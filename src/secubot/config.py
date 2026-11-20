@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import configparser
 import datetime as dt
 import json
 import os
+import tomllib
 from pathlib import Path
 from typing import Literal
 
@@ -278,8 +280,44 @@ def go_modules(repo_root: Path, cfg: SecfixConfig) -> list[Path]:
 PYTHON_MARKERS = {"pyproject.toml", "setup.py", "setup.cfg", "uv.lock", "requirements*.txt"}
 
 
+def read_pyproject(directory: Path) -> dict | None:
+    """The parsed pyproject.toml, {} when it doesn't parse, None when there is none."""
+    path = directory / "pyproject.toml"
+    if not path.is_file():
+        return None
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except tomllib.TOMLDecodeError:
+        return {}
+
+
+def _declares_project(directory: Path) -> bool:
+    # pyproject.toml and setup.cfg also hold settings for tools (ruff, semantic-release,
+    # flake8) in directories with nothing to install; a uv.lock alone has no project.
+    if (directory / "setup.py").is_file() or any(directory.glob("requirements*.txt")):
+        return True
+    pyproject = read_pyproject(directory)
+    if pyproject is not None:
+        tool = pyproject.get("tool") if isinstance(pyproject.get("tool"), dict) else {}
+        uv = tool.get("uv") if isinstance(tool.get("uv"), dict) else {}
+        if (
+            pyproject == {}
+            or any(k in pyproject for k in ("project", "dependency-groups", "build-system"))
+            or "poetry" in tool
+            or "workspace" in uv
+        ):
+            return True
+    setup_cfg = configparser.ConfigParser(interpolation=None)
+    try:
+        setup_cfg.read(directory / "setup.cfg", encoding="utf-8")
+    except (configparser.Error, UnicodeDecodeError):
+        return True
+    return setup_cfg.has_section("metadata") or setup_cfg.has_section("options")
+
+
 def python_projects(repo_root: Path, cfg: SecfixConfig) -> list[Path]:
-    return sorted({p.parent for p in iter_files(repo_root, cfg.skip_spec(), PYTHON_MARKERS)})
+    found = {p.parent for p in iter_files(repo_root, cfg.skip_spec(), PYTHON_MARKERS)}
+    return sorted(d for d in found if _declares_project(d))
 
 
 def node_projects(repo_root: Path, cfg: SecfixConfig) -> list[Path]:

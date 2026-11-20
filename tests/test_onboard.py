@@ -176,13 +176,89 @@ def test_default_commands_single_stack_and_pip_subdir(tmp_path):
     assert agent_singles("go build ./...", "go test ./...") == []
 
 
+def test_tool_config_at_the_root_is_not_a_project(tmp_path):
+    write(
+        tmp_path,
+        {
+            "pyproject.toml": "[tool.semantic_release]\ntag_format = 'v{version}'\n",
+            "uv.lock": "version = 1\n",
+            "backend/pyproject.toml": (
+                "[project]\nname = 'b'\n[project.optional-dependencies]\n"
+                "dev = ['pytest>=9', 'ruff']\n"
+            ),
+            "backend/uv.lock": "",
+            "backend/tests/test_api.py": "",
+        },
+    )
+    facts = analyse(tmp_path)
+    assert [(p.kind, p.path) for p in facts.projects] == [("python", "backend")]
+    cmds = default_commands(facts)
+    assert cmds.setup == "uv --directory backend sync --frozen --extra dev"
+    assert cmds.test == "uv --directory backend run pytest -q"
+    assert dependabot_dirs(facts)["uv"] == ["/backend"]
+
+
+@pytest.mark.parametrize(
+    ("files", "python"),
+    [
+        ({"pyproject.toml": "[tool.ruff]\nline-length = 100\n"}, False),
+        ({"setup.cfg": "[flake8]\nmax-line-length = 100\n"}, False),
+        ({"uv.lock": "version = 1\n"}, False),
+        ({"pyproject.toml": "[tool.uv.workspace]\nmembers = ['pkgs/*']\n"}, True),
+        ({"pyproject.toml": "[tool.poetry]\nname = 'x'\n"}, True),
+        ({"pyproject.toml": "[dependency-groups]\ndev = ['pytest']\n"}, True),
+        ({"pyproject.toml": "not toml ["}, True),  # can't tell: keep it
+        ({"setup.cfg": "[metadata]\nname = x\n"}, True),
+        ({"requirements-dev.txt": "pytest\n"}, True),
+    ],
+)
+def test_python_project_markers(tmp_path, files, python):
+    write(tmp_path, files)
+    assert ("python" in detect_languages(tmp_path, SecfixConfig())) is python
+
+
+def test_tests_of_a_nested_project_are_its_own(tmp_path):
+    write(
+        tmp_path,
+        {
+            "pyproject.toml": "[project]\nname = 'root'\n",
+            "api/pyproject.toml": "[project]\nname = 'api'\n",
+            "api/tests/test_api.py": "",
+        },
+    )
+    by_path = {p.path: p for p in analyse(tmp_path).projects}
+    assert not by_path[""].has_tests and by_path["api"].has_tests
+
+
+@pytest.mark.parametrize(
+    ("pyproject", "setup"),
+    [
+        ("[dependency-groups]\ndev = ['pytest']\n", "uv sync --frozen"),
+        (
+            "[dependency-groups]\ntest = ['pytest-cov', 'pytest>=8']\n",
+            "uv sync --frozen --group test",
+        ),
+        ("[project.optional-dependencies]\ntest = ['pytest']\n", "uv sync --frozen --extra test"),
+        ("[tool.uv]\ndev-dependencies = ['pytest']\n", "uv sync --frozen"),
+        ("[project.optional-dependencies]\n'a;b' = ['pytest']\n", "uv sync --frozen"),
+        ("", "uv sync --frozen"),
+    ],
+)
+def test_uv_setup_installs_pytest(tmp_path, pyproject, setup):
+    write(
+        tmp_path,
+        {"pyproject.toml": "[project]\nname = 'x'\n" + pyproject, "uv.lock": "", "tests/x.py": ""},
+    )
+    assert default_commands(analyse(tmp_path)).setup == setup
+
+
 def test_render_secfix_is_valid_config(tmp_path):
     cmds = default_commands(analyse(write(tmp_path, MULTI)))
     text = render_secfix(cmds, extra_skip=["docs/"], dependencies_all=True)
     cfg = SecfixConfig.model_validate(yaml.safe_load(text))
     assert cfg.commands.test == cmds.test and cfg.fix.extra_commands == cmds.extra
     assert "docs/" in cfg.paths.skip and "node_modules/" in cfg.paths.skip  # defaults kept
-    assert cfg.policy.dependencies == "all" and cfg.policy.max_prs == 1
+    assert cfg.policy.dependencies == "all" and cfg.policy.max_prs == 3
 
 
 def test_render_dependabot(tmp_path):
@@ -357,6 +433,7 @@ def test_wizard_sets_everything_up(tmp_path):
     assert set(gh.pushed) == {CALLER_PATH, SECFIX_PATH, DEPENDABOT_PATH}
     cfg = SecfixConfig.model_validate(yaml.safe_load(gh.pushed[SECFIX_PATH]))
     assert cfg.policy.dependencies == "breaking-only"  # Dependabot is on
+    assert cfg.policy.max_prs == 3
     assert gh.prs[0]["head"] == "secubot/onboarding" and gh.prs[0]["base"] == "main"
     assert "gh workflow run secfix.yml -R o/r" in gh.prs[0]["body"]
     assert any("pull/1" in line for line in lines)
@@ -404,6 +481,28 @@ def test_wizard_command_flags_override_detection(tmp_path):
     assert commands["test"] == "make test" and "build" not in commands
     caller = yaml.safe_load(gh.pushed[CALLER_PATH])  # no --ref: the current major
     assert caller["jobs"]["secfix"]["uses"].endswith("/.github/workflows/secfix.yml@v1")
+
+
+@pytest.mark.parametrize(
+    ("extra", "conf", "expected"),
+    [(["--max-prs", "5"], OnboardSettings(max_prs=2), 5), ([], OnboardSettings(max_prs=2), 2)],
+)
+def test_wizard_max_prs(tmp_path, extra, conf, expected):
+    gh = FakeGitHub(write(tmp_path / "src", MULTI))
+    args = args_for("--api-key-file", key_file(tmp_path), *extra)
+    assert onboard(args, gh, DefaultsPrompter(), out=lambda _: None, conf=conf) == 0
+    assert yaml.safe_load(gh.pushed[SECFIX_PATH])["policy"]["max_prs"] == expected
+
+
+def test_wizard_rejects_bad_max_prs(tmp_path):
+    gh = FakeGitHub(write(tmp_path / "src", MULTI))
+    with pytest.raises(OnboardError, match="max_prs: a whole number from 0 to 20"):
+        onboard(
+            args_for("--api-key-file", key_file(tmp_path), "--max-prs", "50"),
+            gh,
+            DefaultsPrompter(),
+        )
+    assert gh.prs == []
 
 
 @pytest.mark.parametrize(

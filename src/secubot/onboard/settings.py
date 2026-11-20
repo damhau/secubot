@@ -33,6 +33,7 @@ class OnboardSettings(_Strict):
     ref: str | None = None
     branch: str | None = None
     dependabot: bool = True
+    max_prs: int | None = Field(None, ge=0, le=20)
     api_key_file: str | None = None
     api_key_command: str | None = None
     app_id: int | None = None

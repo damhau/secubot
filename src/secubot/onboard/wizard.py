@@ -17,10 +17,12 @@ from pathlib import Path
 from typing import Protocol
 
 from secubot import __version__
+from secubot.config import Policy
 from secubot.onboard.analyse import RepoFacts, analyse
 from secubot.onboard.github import GitHub, OnboardError, check_app, missing_extra
 from secubot.onboard.render import (
     CALLER_PATH,
+    DEFAULT_MAX_PRS,
     DEFAULT_SECUBOT_REPO,
     DEPENDABOT_PATH,
     SECFIX_PATH,
@@ -287,6 +289,24 @@ def _ask_commands(args, facts: RepoFacts, ask: Prompter) -> Commands:
     return make_commands(*(values[n].strip() or None for n in ("setup", "build", "test")))
 
 
+def _ask_max_prs(args, ask: Prompter) -> int:
+    def check(value: str) -> bool | str:
+        try:
+            Policy(max_prs=int(value.strip()))
+        except ValueError:
+            return "a whole number from 0 to 20"
+        return True
+
+    answer = ask.text(
+        "Draft PRs per run (max_prs; more fixes wait for the next run)",
+        str(args.max_prs),
+        validate=check,
+    )
+    if (problem := check(answer)) is not True:  # --yes doesn't validate
+        raise OnboardError(f"max_prs: {problem}")
+    return int(answer.strip())
+
+
 def build_plan(
     args, gh: GitHub, facts: RepoFacts, info: dict, ask: Prompter, conf: OnboardSettings
 ) -> Plan:
@@ -301,6 +321,7 @@ def build_plan(
 
     # Build and test commands ------------------------------------------------------------
     skip: list[str] = []
+    max_prs = DEFAULT_MAX_PRS
     if facts.secfix_config:
         plan.kept.append(SECFIX_PATH)
     else:
@@ -309,6 +330,7 @@ def build_plan(
             "Extra paths to skip (comma-separated, e.g. docs/, examples/)", args.skip or ""
         )
         skip = [s.strip() for s in answer.split(",") if s.strip()]
+        max_prs = _ask_max_prs(args, ask)
 
     # Dependabot ------------------------------------------------------------------------
     want_dependabot_file = False
@@ -350,7 +372,7 @@ def build_plan(
     # Files --------------------------------------------------------------------------------
     if not facts.secfix_config:
         plan.files[SECFIX_PATH] = render_secfix(
-            plan.commands, extra_skip=skip, dependencies_all=dependencies_all
+            plan.commands, extra_skip=skip, dependencies_all=dependencies_all, max_prs=max_prs
         )
     if facts.caller:
         plan.kept.append(facts.caller)
@@ -482,6 +504,8 @@ def apply_settings(args, conf: OnboardSettings) -> None:
     args.branch = args.branch or conf.branch or DEFAULT_BRANCH
     if args.dependabot is None:
         args.dependabot = conf.dependabot
+    if args.max_prs is None:
+        args.max_prs = DEFAULT_MAX_PRS if conf.max_prs is None else conf.max_prs
 
 
 def onboard(args, gh: GitHub, ask: Prompter, out=print, conf: OnboardSettings | None = None):
